@@ -456,10 +456,20 @@ def _hp_ok(unit: "Unit | None", op: str, val: float) -> bool:
     return pct < val if op == "lt" else pct >= val
 
 
+def _target_has(unit: "Unit | None", name: str, count: int = 1) -> bool:
+    """대상이 상태 `name`을 보유했는가. '조롱(Taunt)'은 stacks가 아니라 taunt_turns로
+    추적되므로 특수 처리 (리카노 '조롱 보유 적 → 주는딜+18%' 등)."""
+    if unit is None:
+        return False
+    if name == "Taunt":
+        return unit.taunt_turns > 0
+    return unit.stacks.get(name, 0) >= count
+
+
 def _tcd_active(entry: tuple, target: "Unit | None") -> bool:
     """A conditional-주는딜 entry is live when its stack and/or target-HP gate hold."""
     stack, _bonus, _owner, _skill, hp_op, hp_val = entry
-    if stack is not None and (target is None or target.stacks.get(stack, 0) <= 0):
+    if stack is not None and not _target_has(target, stack):
         return False
     if hp_op is not None and not _hp_ok(target, hp_op, hp_val):
         return False
@@ -844,9 +854,13 @@ def _qualifies(sub: "Subscription", caster: Unit, target: Unit | None) -> bool:
     # applies (e.g. 바드 필살이 각흔 부여) doesn't satisfy its own gate that turn.
     tgt_stacks = (target.gate_snap if target is not None and target.gate_snap is not None
                   else (target.stacks if target is not None else {}))
-    return (_gate_ok(caster, sub.gate_stack, sub.gate_count)
-            and (not sub.target_gate_stack
-                 or tgt_stacks.get(sub.target_gate_stack, 0) >= sub.target_gate_count))
+    if not sub.target_gate_stack:
+        target_ok = True
+    elif sub.target_gate_stack == "Taunt":            # 조롱은 taunt_turns로 추적
+        target_ok = target is not None and target.taunt_turns > 0
+    else:
+        target_ok = tgt_stacks.get(sub.target_gate_stack, 0) >= sub.target_gate_count
+    return _gate_ok(caster, sub.gate_stack, sub.gate_count) and target_ok
 
 
 def _repeat_count(sub: "Subscription", state: BattleState) -> int:
