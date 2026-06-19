@@ -284,6 +284,7 @@ class BattleState:
     rng: random.Random = field(default_factory=lambda: random.Random(0))
     unapplied: Counter = field(default_factory=Counter)   # parsed-but-not-applied effects
     enemy_hits: int = 0          # allies the enemy hits per turn (0 = all, by slot order)
+    enemy_aoe: bool = False       # 전체공격: 적이 아군 전체를 1회 동시 피격 (조롱 무관, 반격 아군당 1회)
     turn_orders: dict = field(default_factory=dict)   # {turn:[slot,...]} per-turn action-order override
     cur_action: int = 0          # incremented per _take_action; stamped on each event
     cur_actor_id: int = 0
@@ -1057,14 +1058,18 @@ def _take_action(unit: Unit, state: BattleState) -> None:
         # (no ally hit twice), firing their defensive subs (쿼터백/성노 counters).
         # N=0 -> all allies. Order kept by slot for deterministic sub firing.
         living = [u for u in state.foes(unit) if u.alive]
-        n = state.enemy_hits if state.enemy_hits > 0 else len(living)
-        taunters = [u for u in living if u.taunt_turns > 0]
-        if taunters:
-            # 조롱: 모든 타격이 조롱한 탱커(들)에게 강제로 — 탱커가 피격·반격을 흡수
-            chosen = [taunters[i % len(taunters)] for i in range(n)]
+        if state.enemy_aoe:
+            # 전체공격: 아군 전체를 1회씩 동시 피격 (조롱 집중 없음 → 반격은 아군당 1회)
+            chosen = living
         else:
-            n = min(n, len(living))
-            chosen = state.rng.sample(living, n) if n < len(living) else living
+            n = state.enemy_hits if state.enemy_hits > 0 else len(living)
+            taunters = [u for u in living if u.taunt_turns > 0]
+            if taunters:
+                # 조롱: 모든 타격이 조롱한 탱커(들)에게 강제로 — 탱커가 피격·반격을 흡수
+                chosen = [taunters[i % len(taunters)] for i in range(n)]
+            else:
+                n = min(n, len(living))
+                chosen = state.rng.sample(living, n) if n < len(living) else living
         for ally in sorted(chosen, key=lambda u: u.slot):
             # 피격 단위로 그룹: "더미N → [피격 아군]" 헤더 + 그로 인한 반격·버프·스택을 그 아래에.
             state.cur_action += 1
@@ -1303,7 +1308,7 @@ def simulate(kits: list[ResolvedKit], n_dummies: int = 1, max_turn: int = 30,
              slots: list[int] | None = None,
              priorities: list[float] | None = None,
              enemy_hits: int = 0, turn_orders: dict | None = None,
-             force_proc: bool = False) -> BattleState:
+             force_proc: bool = False, enemy_aoe: bool = False) -> BattleState:
     """Run a target-dummy battle and return the final state (with log).
 
     rotations: optional per-ally action strings (e.g. '평평방궁|평방궁').
@@ -1321,7 +1326,7 @@ def simulate(kits: list[ResolvedKit], n_dummies: int = 1, max_turn: int = 30,
         allies.append(u)
     enemies = [make_dummy(i) for i in range(max(1, min(n_dummies, 5)))]
     state = BattleState(allies=allies, enemies=enemies, max_turn=max_turn,
-                        rng=random.Random(seed), enemy_hits=enemy_hits,
+                        rng=random.Random(seed), enemy_hits=enemy_hits, enemy_aoe=enemy_aoe,
                         turn_orders=turn_orders or {}, force_proc=force_proc,
                         hp_schedule=any(_kit_has_hp_gate(u._kit) for u in allies))
 

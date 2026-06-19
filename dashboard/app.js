@@ -562,7 +562,7 @@ async function run(save = true) {
   const btn = $('#runBtn'); btn.classList.add('busy'); btn.querySelector('span').innerHTML = '<span class="spin"></span>계산 중…';
   const cfg = {
     team: picked.map(s => ({ id: s.id, position: s.position, skill: s.skill, rune: s.rune, rotation: s.rotation || null, priority: s.priority, sealAtk: s.sealOn ? (s.sealAtk ?? 0) : 0, sealHp: s.sealOn ? (s.sealHp ?? 0) : 0 })),
-    turns: +$('#turns').value, dummies: +$('#dummies').dataset.val, enemyHits: +$('#enemyHits').dataset.val,
+    turns: +$('#turns').value, dummies: +$('#dummies').dataset.val, enemyHits: $('#enemyHits').dataset.val,
     turnOrders: turnOverrides, forceProc, runs: +$('#runs').value,
   };
   try {
