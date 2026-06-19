@@ -17,8 +17,12 @@ const ready = (async () => {
   postMessage({ type: 'progress', msg: '엔진·데이터 불러오는 중…' });
   try { pyodide.FS.mkdir('woofia_sim'); } catch {}
   try { pyodide.FS.mkdir('data'); } catch {}
+  // 배포 버전을 쿼리로 붙여 캐시 무력화 — 새 배포마다 새 URL이라 항상 최신 엔진을 받는다.
+  let ver = '';
+  try { ver = (await (await fetch('version.json', { cache: 'no-store' })).json()).updated || ''; } catch {}
+  const q = '?v=' + encodeURIComponent(ver || Date.now());
   const all = [...PY_FILES, ...DATA_FILES];
-  const texts = await Promise.all(all.map(p => fetch(p).then(r => {
+  const texts = await Promise.all(all.map(p => fetch(p + q, { cache: 'no-cache' }).then(r => {
     if (!r.ok) throw new Error(`${p} 로드 실패 (${r.status})`); return r.text();
   })));
   all.forEach((p, i) => pyodide.FS.writeFile(p, texts[i]));
