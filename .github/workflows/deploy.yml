@@ -31,6 +31,7 @@ jobs:
           cp sim_api.py _site/sim_api.py
           cp data/chars.json data/skills.json _site/data/
           rm -f _site/result.json
+          printf '{"updated":"%s"}' "$(git log -1 --format=%cI)" > _site/version.json
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

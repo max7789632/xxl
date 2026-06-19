@@ -138,6 +138,17 @@ function bindHistory() {
   };
 }
 
+// 마지막 업데이트(배포) 시각 — version.json(배포 시 기록)을 읽어 우측 하단에 KST로 표시
+(function showLastUpdate() {
+  const el = document.getElementById('lastUpdate'); if (!el) return;
+  fetch('version.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(v => {
+    if (!v || !v.updated) { el.textContent = '개발 모드 · 로컬'; return; }
+    const d = new Date(v.updated);
+    const s = d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    el.textContent = `마지막 업데이트 ${s}`;
+  }).catch(() => { el.textContent = '개발 모드 · 로컬'; });
+})();
+
 // ── boot ──
 (async function init() {
   if (!USE_PY) document.getElementById('boot')?.remove();   // 로컬(fetch)은 즉시 로딩
