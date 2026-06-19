@@ -148,7 +148,7 @@ class Unit:
     barrier: float = 0.0            # current shield amount
     taunt_turns: int = 0            # 조롱: >0이면 적이 이 아군을 강제 타격 (쿠모야마)
     hots: list = field(default_factory=list)  # [target, per_turn, turns_left] heal-over-time
-    dots: list = field(default_factory=list)  # [target, pct, turns_left, owner, src_skill] 지속딜(DoT)
+    dots: list = field(default_factory=list)  # [target, pct, turns_left, owner, src_skill, cast_snapshot] 지속딜(DoT)
     cond_buffs: list = field(default_factory=list)  # (stack,stat,value,owner,skill,scaled,thresh) while stacks≥thresh
     stack_caps: dict = field(default_factory=dict)  # stack_name -> max count (from its definition line)
 
@@ -481,15 +481,51 @@ def _tcd_active(entry: tuple, target: "Unit | None") -> bool:
     return True
 
 
+def _dot_cast_snapshot(caster: "Unit", tgt: "Unit") -> dict:
+    """DoT 부여 시점에 시전자 측 데미지 구성요소를 고정 캡처한다 — 지속딜은 부여 당시
+    스펙을 따르고 이후 시전자 ATK/버프 변화엔 영향받지 않는다(대상측 받뎀은 틱 시점 현재값)."""
+    dealt = caster._comp(STAT_DMG_DEALT)
+    for entry in caster.target_cond_dmg:
+        if _tcd_active(entry, tgt):
+            stk, bonus, owner, skill, hp_op, hp_val = entry
+            cond_kr = kr(stk) if stk else (f"HP<{hp_val:g}%" if hp_op == "lt" else f"HP≥{hp_val:g}%")
+            dealt.append({"v": bonus, "by": owner, "skill": skill, "cond": cond_kr})
+    return {
+        "atk": caster.atk_eff(), "out": caster.outgoing_mult("dot", tgt),
+        "base": caster.base_atk, "baseAtk": caster._comp(STAT_BASE_ATK),
+        "atkC": caster._comp(STAT_ATK), "flat": caster._comp(STAT_ATK_FLAT),
+        "dealt": dealt, "dotDealt": caster._comp(STAT_DOT_DEALT),
+        "detail": caster.outgoing_detail("dot", tgt),
+    }
+
+
 def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: str,
-                src_id: int, src_skill: str, state: "BattleState") -> None:
-    """Compute, apply and log one damage hit. Shared by direct DAMAGE and DoT ticks."""
-    atk = caster.atk_eff()
-    eff_stat = _ACTION_EFF.get(action, "")
-    out = caster.outgoing_mult(action, tgt)
+                src_id: int, src_skill: str, state: "BattleState",
+                snap: dict | None = None) -> None:
+    """Compute, apply and log one damage hit. Shared by direct DAMAGE and DoT ticks.
+    snap(있으면, DoT): 시전자 측(ATK·주는딜·지속딜증가)을 부여 시점 값으로 고정."""
+    if snap is not None:                      # DoT: 시전 시점 스냅샷 사용 (시전자 측 고정)
+        atk, out = snap["atk"], snap["out"]
+        dealt, dot_dealt = list(snap["dealt"]), snap["dotDealt"]
+        base, baseAtk, atkC, flat = snap["base"], snap["baseAtk"], snap["atkC"], snap["flat"]
+        detail, eff = snap["detail"], []
+    else:
+        atk = caster.atk_eff()
+        out = caster.outgoing_mult(action, tgt)
+        dealt = caster._comp(STAT_DMG_DEALT)
+        for entry in caster.target_cond_dmg:
+            if _tcd_active(entry, tgt):
+                stk, bonus, owner, skill, hp_op, hp_val = entry
+                cond_kr = kr(stk) if stk else (f"HP<{hp_val:g}%" if hp_op == "lt" else f"HP≥{hp_val:g}%")
+                dealt.append({"v": bonus, "by": owner, "skill": skill, "cond": cond_kr})
+        dot_dealt = caster._comp(STAT_DOT_DEALT) if action == "dot" else []
+        base, baseAtk = caster.base_atk, caster._comp(STAT_BASE_ATK)
+        atkC, flat = caster._comp(STAT_ATK), caster._comp(STAT_ATK_FLAT)
+        eff_stat = _ACTION_EFF.get(action, "")
+        eff = caster._comp(eff_stat) if eff_stat else []
+        detail = caster.outgoing_detail(action, tgt)
     inc = tgt.incoming_mult(caster.element)
-    # 지속(도트) 전용 채널 — DoT 틱에만: 지속뎀 주는증가(시전자) × 지속뎀 받는증가(대상)
-    dot_dealt = caster._comp(STAT_DOT_DEALT) if action == "dot" else []
+    # 지속(도트) 받는증가는 대상측이라 틱 시점 현재값 (모이루 받는지속딜 +50% 후속 적용 반영)
     dot_taken = ([{"v": round(b.value, 2), "by": b.owner, "skill": b.src_skill}
                   for b in tgt.buffs if b.stat == STAT_DOT_TAKEN] if action == "dot" else [])
     dot_mult = ((1 + sum(c["v"] for c in dot_dealt) / 100) *
@@ -497,12 +533,6 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
     dmg = round(atk * pct / 100 * out * inc * dot_mult, 2)
     tgt.hp -= dmg
     caster.damage_dealt += dmg
-    dealt = caster._comp(STAT_DMG_DEALT)
-    for entry in caster.target_cond_dmg:
-        if _tcd_active(entry, tgt):
-            stk, bonus, owner, skill, hp_op, hp_val = entry
-            cond_kr = kr(stk) if stk else (f"HP<{hp_val:g}%" if hp_op == "lt" else f"HP≥{hp_val:g}%")
-            dealt.append({"v": bonus, "by": owner, "skill": skill, "cond": cond_kr})
     # 받뎀증은 별개 곱연산 채널 2개: 일반(element 0) / 속성(공격자 속성과 일치)
     taken_g = [{"v": round(b.value, 2), "by": b.owner, "skill": b.src_skill}
                for b in tgt.buffs if b.stat == STAT_DMG_TAKEN and b.element == 0]
@@ -512,17 +542,15 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
                and b.element != 0 and b.element == caster.element]
     struct = {
         "act": act_kr, "target": tgt.name, "final": dmg,
-        "base": caster.base_atk, "atkTotal": round(atk, 2),
-        "baseAtk": caster._comp(STAT_BASE_ATK), "atk": caster._comp(STAT_ATK),
-        "flat": caster._comp(STAT_ATK_FLAT),
+        "base": base, "atkTotal": round(atk, 2),
+        "baseAtk": baseAtk, "atk": atkC, "flat": flat,
         "skillPct": pct, "skillId": src_id, "skillName": src_skill,
         "dealt": dealt,
         "effLabel": {"basic": "평타뎀", "ex": "EX효과", "trigger": "발동효과", "dot": "지속딜"}.get(action, ""),
-        "eff": caster._comp(eff_stat) if eff_stat else [],
+        "eff": eff,
         "takenG": taken_g, "takenP": taken_p,
         "dotDealt": dot_dealt, "dotTaken": dot_taken,
     }
-    detail = caster.outgoing_detail(action, tgt)
     state.record(caster.name,
                  f"{act_kr} → {tgt.name} {dmg:,.2f} = "
                  f"{atk:,.2f}ATK × {pct:g}% × {out:.4f}[{detail}] × {inc:.4f}in",
@@ -694,14 +722,16 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
             # 안 받고 주는딜·받뎀만). 부여 시점엔 등록만. 같은 스킬의 DoT는 갱신(인스턴스 1개),
             # 다른 스킬의 DoT는 공존한다 (모이루 평타↔방어 도트, 최유희 도트 등 — 각각 별개 스킬).
             for tgt in targets:
+                snap = _dot_cast_snapshot(caster, tgt)   # 부여 시점 시전자 스펙 고정
                 same = next((e for e in caster.dots if e[0] is tgt
                              and e[3] == effect.owner and e[4] == effect.src_skill), None)
                 if same:
-                    same[1] = effect.magnitude          # 같은 스킬 재적용 -> 남은 턴만 갱신
+                    same[1] = effect.magnitude          # 같은 스킬 재적용 -> 턴·스냅샷 갱신
                     same[2] = int(effect.duration)
+                    same[5] = snap
                 else:
                     caster.dots.append([tgt, effect.magnitude, int(effect.duration),
-                                        effect.owner, effect.src_skill])
+                                        effect.owner, effect.src_skill, snap])
                 state.record(caster.name,
                              f"{act_kr} 지속딜 → {tgt.name} {effect.magnitude:g}%/턴 ×{effect.duration}턴",
                              amount=0, src_id=effect.owner, src_skill=effect.src_skill)
@@ -1113,9 +1143,9 @@ def _tick_dots(state: BattleState) -> None:
         state.cur_action_kind = "지속딜"
         kept = []
         for entry in u.dots:
-            tgt, pct, turns, src_id, src_skill = entry
+            tgt, pct, turns, src_id, src_skill, snap = entry
             if tgt.alive:
-                _record_hit(u, tgt, pct, "dot", "지속", src_id, src_skill, state)
+                _record_hit(u, tgt, pct, "dot", "지속", src_id, src_skill, state, snap=snap)
             entry[2] = turns - 1
             if entry[2] > 0:
                 kept.append(entry)
