@@ -99,6 +99,8 @@ class Subscription:
     target_gate_count: int = 0
     repeat_stack: str | None = None        # fire N times = enemies' total stacks of this
     need_team_barrier: bool = False        # only fire while ALL allies hold a barrier (오렘)
+    once: bool = False                     # "1회만 적용" — fires once per arm (모이루 보호막)
+    armed: bool = True                     # once-sub: True until it fires; re-armed on re-grant
 
 
 # site class/element name -> game id (ERoleKind / EProp)
@@ -127,6 +129,7 @@ class Unit:
     base_actions: int = 1           # rotation-driven actions per turn (이태호 = 2)
     extra_basic: bool = False       # 이태호: actions beyond base_actions = forced 평타, no token
     turn_acts: int = 0              # actions taken this turn (reset each turn)
+    auto_fatal_pending: bool = False  # 지정 궁이 쿨 미충족으로 불발 → 쿨 차는 대로 자동 발동 예약
     hold_fatal_stacks: set = field(default_factory=set)  # skip fatal while holding these
     feeds_position: int = 0          # fatal grants an extra action to this position's ally
     is_fed_carry: bool = False       # a feeder resets my CD -> fatal on every CD-ready action
@@ -601,16 +604,20 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
         else:
             # avoid duplicate registration when the same grant re-fires (e.g. 멍 re-ults
             # at T1 then T4): refresh, don't stack a second identical subscription.
-            dup = any(s.event == (cond or "") and s.effects is effect.sub_effects
-                      and s.grantor is grantor for s in caster.subs)
-            if not dup:
+            once = any(child.once for child in effect.sub_effects)
+            dup = next((s for s in caster.subs if s.event == (cond or "")
+                        and s.effects is effect.sub_effects and s.grantor is grantor), None)
+            if dup is None:
                 caster.subs.append(Subscription(
                     event=cond or "", effects=effect.sub_effects,
                     chance=effect.chance,
                     gate_stack=effect.stack_name, gate_count=effect.max_stacks,
                     param=effect.trigger_param, pos=effect.trigger_pos, grantor=grantor,
                     target_gate_stack=effect.target_stack, target_gate_count=effect.target_count,
-                    repeat_stack=effect.repeat_stack, need_team_barrier=effect.team_barrier))
+                    repeat_stack=effect.repeat_stack, need_team_barrier=effect.team_barrier,
+                    once=once))
+            elif once:
+                dup.armed = True            # 재발동(예: 다음 EX) 시 once 보호막 재장전
         return
 
     targets = _resolve_targets(effect, caster, state, current_target, grantor)
@@ -842,10 +849,13 @@ def _fire_subs(caster: Unit, event: str, state: BattleState,
     # (e.g. transform A->B and B->A) don't chain-cancel within one event.
     ready = [s for s in list(caster.subs)
              if s.event == event and _qualifies(s, caster, current_target)
-             and (not s.need_team_barrier or _team_has_barrier(caster, state))]
+             and (not s.need_team_barrier or _team_has_barrier(caster, state))
+             and (not s.once or s.armed)]          # once-sub: 장전된 동안만
     for sub in ready:
         if not state.force_proc and sub.chance < 100 and state.rng.random() * 100 >= sub.chance:
             continue
+        if sub.once:
+            sub.armed = False                       # 1회 발동 후 소진 (다음 재발동에 재장전)
         # triggered damage is 발동 by default; 내기혼신 (Qi Surge) is judged basic
         src = "basic" if sub.gate_stack in BASIC_JUDGED_STACKS else "trigger"
         reps = _repeat_count(sub, state) if sub.repeat_stack else _gate_reps(caster, sub.gate_stack)
@@ -1009,8 +1019,12 @@ def _take_action(unit: Unit, state: BattleState) -> None:
         use_fatal = unit.cd_remaining <= 0
     elif token == "fatal":
         use_fatal = unit.cd_remaining <= 0 and bool(kit_fatal.effects)
+        if not use_fatal and bool(kit_fatal.effects):
+            unit.auto_fatal_pending = True   # 지정 궁이 쿨 미충족으로 불발 → 오토 폴백 예약
     elif token == "basic":
-        use_fatal = False
+        # 폴백: 앞서 지정 궁이 불발됐으면, 쿨이 차는 대로 자동으로 궁 발동 (오토 전환)
+        use_fatal = (unit.auto_fatal_pending and unit.cd_remaining <= 0
+                     and bool(kit_fatal.effects))
     else:  # no rotation -> default policy: fatal if ready, unless holding it
         holding = any(unit.stacks.get(s, 0) > 0 for s in unit.hold_fatal_stacks)
         use_fatal = unit.cd_remaining <= 0 and bool(kit_fatal.effects) and not holding
@@ -1019,6 +1033,7 @@ def _take_action(unit: Unit, state: BattleState) -> None:
     if use_fatal:
         skill, label, event = kit_fatal, "fatal", "on_ex"
         unit.cd_remaining = unit.fatal_cd
+        unit.auto_fatal_pending = False     # 궁 발동했으니 폴백 예약 해제
         state.cur_action_kind = "필살기"
         state.turn_exes.add(cid)            # 다양수이 협동: 이 아군이 이번 턴 필살 사용
     else:

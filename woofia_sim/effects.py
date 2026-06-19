@@ -80,6 +80,7 @@ class Effect:
     owner: int = 0                             # char id whose skill this effect belongs to
     src_skill: str = ""                        # KR skill name (for buff-source drill-down)
     sub_effects: list["Effect"] = field(default_factory=list)
+    once: bool = False                         # "This effect can only trigger 1 time" — 발동마다 1회만
 
     @property
     def parsed(self) -> bool:
@@ -384,7 +385,8 @@ def _b_cc_resist(m):
 @_leaf(rf"^Gain a Barrier {_NUM}% of own (ATK|Max\. HP) for {_NUM} turns?(?:\. This effect can only trigger 1 time)?\.?$")
 def _b_gain_barrier(m):
     return Effect(BARRIER, m.group(0), target="self", magnitude=_f(m.group(1)),
-                  of_max_hp="HP" in m.group(2), duration=int(m.group(3)))
+                  of_max_hp="HP" in m.group(2), duration=int(m.group(3)),
+                  once="can only trigger 1 time" in m.group(0))
 
 
 @_leaf(r"^If no target exists, .+$")

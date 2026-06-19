@@ -484,7 +484,12 @@ function renderPlanner(s, meta) {
     let cells = '';
     for (let a = 0; a < apt; a++) {
       const idx = ti * apt + a, act = s.plan[idx];
-      const b = (k, l) => `<button class="a${k} ${act === k ? 'on' : ''}" data-idx="${idx}" data-a="${k}"${apt === 1 && k === '궁' && !ok[ti] ? ' disabled' : ''}>${l}</button>`;
+      // cdDefendReduce 캐릭(모이루 등)은 궁을 누르면 앞 턴 방어를 자동 배치해 쿨을 맞추므로
+      // 현재 ok[]로 비활성하지 않는다(누른 뒤 enforceCdDefend+normalizePlan이 검증·정리).
+      const b = (k, l) => {
+        const lockUlt = apt === 1 && k === '궁' && !ok[ti] && !(meta.cdDefendReduce > 0);
+        return `<button class="a${k} ${act === k ? 'on' : ''}" data-idx="${idx}" data-a="${k}"${lockUlt ? ' disabled' : ''}>${l}</button>`;
+      };
       cells += `<div class="acts">${b('평', '평')}${b('궁', '궁')}${b('방', '방')}</div>`;
     }
     return `<div class="pcell${apt > 1 ? ' dbl' : ''}"><div class="tn">${t}</div>${cells}</div>`;
