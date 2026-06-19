@@ -64,6 +64,8 @@ STAT_KR_LABEL: dict[str, str] = {
     "ex_eff_pct": "EX효과",
     "trigger_eff_pct": "발동효과",
     "dmg_taken_pct": "받는딜",
+    "dot_taken_pct": "받는 지속딜",
+    "dot_dealt_pct": "지속딜 증가",
 }
 
 

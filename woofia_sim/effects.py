@@ -41,6 +41,8 @@ STAT_BASIC_DMG_DEALT = "basic_eff_pct"      # attackEffBonus (basic-attack actio
 STAT_EX_EFFECT = "ex_eff_pct"               # skill/ultimateEffBonus (EX action)
 STAT_TRIGGERED_EFFECT = "trigger_eff_pct"   # triggerEffBonus (triggered action)
 STAT_DMG_TAKEN = "dmg_taken_pct"            # damagedBonus (target side / self defensive)
+STAT_DOT_TAKEN = "dot_taken_pct"            # GetOtherDotBonusRate (target side) — DoT 틱에만
+STAT_DOT_DEALT = "dot_dealt_pct"            # 지속 데미지 주는 증가 (caster side) — DoT 틱에만
 STAT_ATK_FLAT = "atk_flat"                  # flat ATK add (e.g. % of caster base ATK)
 STAT_HEAL_RECV = "heal_recv_pct"            # 받는 회복량 증가 (target side, heal/HoT received +x%)
 
@@ -322,14 +324,14 @@ def _b_heal_recv(m):
 
 # DoT 전용 채널은 미모델 → 일반 주는딜/받는딜 채널로 근사(§비고)
 @_leaf(rf"^Target DoT damage taken \+{_NUM}%(?: for {_NUM} {_TRN})?\.?$")
-def _b_dot_taken(m):
-    return Effect(DEBUFF, m.group(0), target="target", stat=STAT_DMG_TAKEN,
+def _b_dot_taken(m):                          # 지속(도트) 데미지 전용 받뎀증 — 일반 타격엔 무효
+    return Effect(DEBUFF, m.group(0), target="target", stat=STAT_DOT_TAKEN,
                   magnitude=_f(m.group(1)), duration=_opt_dur(m, 2))
 
 
 @_leaf(rf"^Own DoT damage dealt \+{_NUM}%(?: for {_NUM} {_TRN})?(?:, up to {_NUM} {_STK})?\.?$")
-def _b_dot_dealt(m):
-    return Effect(BUFF, m.group(0), target="self", stat=STAT_DMG_DEALT,
+def _b_dot_dealt(m):                          # 지속(도트) 데미지 전용 주는증가 — 일반 타격엔 무효
+    return Effect(BUFF, m.group(0), target="self", stat=STAT_DOT_DEALT,
                   magnitude=_f(m.group(1)), duration=_opt_dur(m, 2),
                   max_stacks=int(m.group(3)) if m.group(3) else 1)
 

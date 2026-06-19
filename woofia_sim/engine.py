@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 from .effects import (
     BARRIER, BUFF, CC, CD_MOD, COND_DMG, DAMAGE, DEBUFF, EXTRA_ACTION, HEAL,
     MARKER, STACK, TRANSFORM, TRIGGER, STAT_ATK, STAT_BASE_ATK, STAT_ATK_FLAT,
-    STAT_DMG_DEALT, STAT_DMG_TAKEN, STAT_BASIC_DMG_DEALT, STAT_EX_EFFECT,
+    STAT_DMG_DEALT, STAT_DMG_TAKEN, STAT_DOT_TAKEN, STAT_DOT_DEALT,
+    STAT_BASIC_DMG_DEALT, STAT_EX_EFFECT,
     STAT_TRIGGERED_EFFECT, STAT_HEAL_RECV, Effect,
 )
 from .kit import ResolvedKit
@@ -484,7 +485,13 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
     eff_stat = _ACTION_EFF.get(action, "")
     out = caster.outgoing_mult(action, tgt)
     inc = tgt.incoming_mult(caster.element)
-    dmg = round(atk * pct / 100 * out * inc, 2)
+    # 지속(도트) 전용 채널 — DoT 틱에만: 지속뎀 주는증가(시전자) × 지속뎀 받는증가(대상)
+    dot_dealt = caster._comp(STAT_DOT_DEALT) if action == "dot" else []
+    dot_taken = ([{"v": round(b.value, 2), "by": b.owner, "skill": b.src_skill}
+                  for b in tgt.buffs if b.stat == STAT_DOT_TAKEN] if action == "dot" else [])
+    dot_mult = ((1 + sum(c["v"] for c in dot_dealt) / 100) *
+                (1 + sum(c["v"] for c in dot_taken) / 100))
+    dmg = round(atk * pct / 100 * out * inc * dot_mult, 2)
     tgt.hp -= dmg
     caster.damage_dealt += dmg
     dealt = caster._comp(STAT_DMG_DEALT)
@@ -510,6 +517,7 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
         "effLabel": {"basic": "평타뎀", "ex": "EX효과", "trigger": "발동효과", "dot": "지속딜"}.get(action, ""),
         "eff": caster._comp(eff_stat) if eff_stat else [],
         "takenG": taken_g, "takenP": taken_p,
+        "dotDealt": dot_dealt, "dotTaken": dot_taken,
     }
     detail = caster.outgoing_detail(action, tgt)
     state.record(caster.name,

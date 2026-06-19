@@ -713,8 +713,11 @@ function renderHit(l) {
   const tg = (d.takenG || []).length ? ' × ' + chan('받는딜', d.takenG) : '';
   const tp = (d.takenP || []).length ? ' × ' + chan('속성 받는딜', d.takenP) : '';
   const takenOld = (d.taken || []).length ? ' × ' + chan('받는딜', d.taken) : '';
+  // 지속(도트) 전용 채널 — DoT 틱에만 표시
+  const dd = (d.dotDealt || []).length ? ' × ' + chan('지속딜 증가', d.dotDealt) : '';
+  const dt = (d.dotTaken || []).length ? ' × ' + chan('받는 지속딜', d.dotTaken) : '';
   return `<div class="hit"><div class="hit-top"><b class="num">${fmt(d.final)}</b><span class="hm">ATK ${fmt(d.atkTotal)}</span></div>
-    <div class="formula">(${inner}) × ${sk}${dealt}${eff}${tg}${tp}${takenOld}</div></div>`;
+    <div class="formula">(${inner}) × ${sk}${dealt}${eff}${tg}${tp}${takenOld}${dd}${dt}</div></div>`;
 }
 function showSource(chip) {
   document.querySelector('.srcpop')?.remove();
