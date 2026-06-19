@@ -81,6 +81,7 @@ class Effect:
     src_skill: str = ""                        # KR skill name (for buff-source drill-down)
     sub_effects: list["Effect"] = field(default_factory=list)
     once: bool = False                         # "This effect can only trigger 1 time" — 발동마다 1회만
+    self_barrier: bool = False                 # 발동 조건: 자신(발동 유닛)이 배리어 보유 (오렘 충격역류)
 
     @property
     def parsed(self) -> bool:
@@ -898,10 +899,13 @@ def parse_line(line: str) -> Effect:
         subs = [parse_line(c) for c in _split_clauses(awm.group(3))]
         if any(s.parsed for s in subs):
             event = _GATE_EVENT.get(awm.group(2)) if awm.group(2) else "on_attack"
-            # "Barrier" team-state is checked for real (오렘 충격역류 = 아군 전원 베리어 보유 시
-            # 평타 피격 반격, 기리안 등 타 캐릭의 베리어도 포함). 다른 팀상태는 유지로 근사.
-            team_barrier = "Barrier" in awm.group(1)
-            return Effect(TRIGGER, line, condition=event, team_barrier=team_barrier, sub_effects=subs)
+            if "Barrier" in awm.group(1):
+                # 게임 실제 동작(인게임 검증): "아군 전체가 배리어 보유 시 자신이 [X] 시 발동" =
+                # 아군 전체에 부여하고, 각 아군이 자기 배리어 보유 시 [X] 발동(자기 ATK 기준).
+                # 오렘 충격역류: 쿠모야마가 자기 배리어 보유 중 피격되면 쿠모야마 ATK 50%로 반격.
+                inner = Effect(TRIGGER, line, condition=event, self_barrier=True, sub_effects=subs)
+                return Effect(TRIGGER, line, condition="grant_allies", sub_effects=[inner])
+            return Effect(TRIGGER, line, condition=event, sub_effects=subs)
     pbm = _POS_BUDDY.match(line)
     if pbm:
         inner = parse_line(pbm.group(2))

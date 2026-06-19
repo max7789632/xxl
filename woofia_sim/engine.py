@@ -99,6 +99,7 @@ class Subscription:
     target_gate_count: int = 0
     repeat_stack: str | None = None        # fire N times = enemies' total stacks of this
     need_team_barrier: bool = False        # only fire while ALL allies hold a barrier (오렘)
+    need_self_barrier: bool = False        # only fire while THIS unit holds a barrier (오렘 충격역류 부여분)
     once: bool = False                     # "1회만 적용" — fires once per arm (모이루 보호막)
     armed: bool = True                     # once-sub: True until it fires; re-armed on re-grant
 
@@ -481,6 +482,13 @@ def _tcd_active(entry: tuple, target: "Unit | None") -> bool:
     return True
 
 
+def _atk_chan_fields(caster: "Unit") -> dict:
+    """힐/베리어 ATK 분해용 — 데미지 hit과 동일한 ATK 채널(base × 기초ATK% × ATK% + 고정)."""
+    return {"baseLabel": "ATK", "base": caster.base_atk,
+            "baseAtk": caster._comp(STAT_BASE_ATK), "atk": caster._comp(STAT_ATK),
+            "flat": caster._comp(STAT_ATK_FLAT), "baseTotal": round(caster.atk_eff(), 2)}
+
+
 def _dot_cast_snapshot(caster: "Unit", tgt: "Unit") -> dict:
     """DoT 부여 시점에 시전자 측 데미지 구성요소를 고정 캡처한다 — 지속딜은 부여 당시
     스펙을 따르고 이후 시전자 ATK/버프 변화엔 영향받지 않는다(대상측 받뎀은 틱 시점 현재값)."""
@@ -643,7 +651,7 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
                     param=effect.trigger_param, pos=effect.trigger_pos, grantor=grantor,
                     target_gate_stack=effect.target_stack, target_gate_count=effect.target_count,
                     repeat_stack=effect.repeat_stack, need_team_barrier=effect.team_barrier,
-                    once=once))
+                    need_self_barrier=effect.self_barrier, once=once))
             elif once:
                 dup.armed = True            # 재발동(예: 다음 EX) 시 once 보호막 재장전
         return
@@ -827,34 +835,57 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
         atk = caster.atk_eff()
         mult = caster.support_mult(action)
         detail = caster.support_detail(action)
-        base_per = round(atk * effect.magnitude / 100 * mult, 2)
+        eff_stat = _ACTION_EFF.get(action, "")
         for tgt in targets:
-            raw = tgt.max_hp * effect.magnitude / 100 if effect.of_max_hp else base_per  # %최대HP 힐
-            per = round(raw * (1 + tgt._sum(STAT_HEAL_RECV) / 100), 2)   # 받는 회복량 증가
+            # of_max_hp면 대상 최대HP의 X%(시전자 ATK 무관), 아니면 ATK% × 효과배율
+            if effect.of_max_hp:
+                raw = tgt.max_hp * effect.magnitude / 100
+                basef = {"baseLabel": f"{tgt.name} 최대HP", "baseTotal": round(tgt.max_hp, 2)}
+            else:
+                raw = atk * effect.magnitude / 100 * mult
+                basef = _atk_chan_fields(caster)       # base × 기초ATK% × ATK% + 고정 풀분해
+            recv = tgt._sum(STAT_HEAL_RECV)                  # 받는 회복량 증가
+            per = round(raw * (1 + recv / 100), 2)
+            struct = {
+                "kind": "heal", "act": act_kr, "final": per, "target": tgt.name,
+                "skillPct": effect.magnitude, "skillId": effect.owner, "skillName": effect.src_skill,
+                "eff": caster._comp(eff_stat) if (eff_stat and not effect.of_max_hp) else [],
+                "healRecv": round(recv, 2), **basef,
+            }
+            # 로그 텍스트는 버프 라인처럼 간결하게, 계산식은 detail(드릴다운)에
             if effect.duration and effect.duration > 0:     # heal-over-time
                 caster.hots.append([tgt, per, effect.duration])
                 state.record(caster.name,
-                             f"{act_kr} 지속힐 → {tgt.name} {per:,.2f}/턴 ×{effect.duration}턴 "
-                             f"= {atk:,.2f}ATK × {effect.magnitude:g}% × {mult:.4f}[{detail}]")
+                             f"{act_kr} 지속힐 → {tgt.name} +{per:,.0f}/턴 ({effect.duration}턴)",
+                             src_id=effect.owner, src_skill=effect.src_skill,
+                             detail={**struct, "hot": effect.duration})
             else:
                 tgt.hp = min(tgt.max_hp, tgt.hp + per)
                 caster.healing_done += per
-                state.record(caster.name,
-                             f"{act_kr} 힐 → {tgt.name} {per:,.2f} = "
-                             f"{atk:,.2f}ATK × {effect.magnitude:g}% × {mult:.4f}[{detail}]",
-                             amount=per)
+                state.record(caster.name, f"{act_kr} 힐 → {tgt.name} +{per:,.0f}",
+                             amount=per, src_id=effect.owner, src_skill=effect.src_skill, detail=struct)
     elif kind == BARRIER:
-        atk = caster.atk_eff()
+        # 베리어 기준값: of_max_hp면 최대HP%, 아니면 ATK% (오렘 = 자신 최대 HP의 X%)
+        base = caster.max_hp if effect.of_max_hp else caster.atk_eff()
+        base_lbl = "최대HP" if effect.of_max_hp else "ATK"
         mult = caster.support_mult(action)
-        detail = caster.support_detail(action)
-        amt = round(atk * effect.magnitude / 100 * mult, 2)
+        amt = round(base * effect.magnitude / 100 * mult, 2)
+        eff_stat = _ACTION_EFF.get(action, "")
+        # 드릴다운: ATK 기반은 base×기초ATK%×ATK%+고정 풀분해, HP 기반은 정적 최대HP
+        basef = {"baseLabel": "최대HP", "baseTotal": round(caster.max_hp, 2)} if effect.of_max_hp \
+            else _atk_chan_fields(caster)
+        struct = {
+            "kind": "barrier", "act": act_kr, "final": round(amt, 2),
+            "skillPct": effect.magnitude, "skillId": effect.owner, "skillName": effect.src_skill,
+            "eff": caster._comp(eff_stat) if eff_stat else [], **basef,
+        }
+        dur = f" ({effect.duration}턴)" if effect.duration and effect.duration > 0 else ""
         for tgt in targets:
             tgt.barrier += amt
             caster.barrier_done += amt
-            state.record(caster.name,
-                         f"{act_kr} 베리어 → {tgt.name} {amt:,.2f} = "
-                         f"{atk:,.2f}ATK × {effect.magnitude:g}% × {mult:.4f}[{detail}]",
-                         amount=amt)
+            state.record(caster.name, f"{act_kr} 베리어 → {tgt.name} +{amt:,.0f}{dur}",
+                         amount=amt, src_id=effect.owner, src_skill=effect.src_skill,
+                         detail={**struct, "target": tgt.name})
     elif kind == CC:
         if effect.stat == "taunt":     # 조롱: 이 유닛(들)이 상대편의 공격을 강제로 끌어온다
             for tgt in targets:
@@ -890,6 +921,7 @@ def _fire_subs(caster: Unit, event: str, state: BattleState,
     ready = [s for s in list(caster.subs)
              if s.event == event and _qualifies(s, caster, current_target)
              and (not s.need_team_barrier or _team_has_barrier(caster, state))
+             and (not s.need_self_barrier or caster.barrier > 0)   # 자기 배리어 보유 시만 (오렘 충격역류)
              and (not s.once or s.armed)           # once-sub: 장전된 동안만
              and (s.target_gate_stack != "Poisoned" or _is_poisoned(current_target, state))]
     for sub in ready:
@@ -956,6 +988,7 @@ def _fire_attack(caster: Unit, events: tuple[str, ...], state: BattleState,
         for sub in [s for s in list(caster.subs)
                     if s.event == event and _qualifies(s, caster, current_target)
                     and (not s.need_team_barrier or _team_has_barrier(caster, state))
+                    and (not s.need_self_barrier or caster.barrier > 0)
                     and (s.target_gate_stack != "Poisoned" or _is_poisoned(current_target, state))]:
             if not state.force_proc and sub.chance < 100 and state.rng.random() * 100 >= sub.chance:
                 continue

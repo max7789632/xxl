@@ -177,7 +177,7 @@ def run_sim(cfg: dict) -> dict:
             char_heal[cid] += u.healing_done
             char_bar[cid] += u.barrier_done
         for ev in st.log:
-            if ev.detail and ev.detail.get("act"):   # damage hits only
+            if ev.detail and ev.detail.get("act") and not ev.detail.get("kind"):  # 데미지 hit만(힐/베리어 제외)
                 chart_acc[ev.turn][ev.actor] += ev.amount
 
     avg_total = sum(run_totals) / runs

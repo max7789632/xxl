@@ -630,10 +630,11 @@ function renderLog(d) {
   d.log.forEach(l => (turns[l.turn] ||= []).push(l));
   $('#log').innerHTML = Object.keys(turns).map(Number).sort((a, b) => a - b).map(tn => {
     const evs = turns[tn];
-    const dmg = evs.filter(l => l.detail && l.detail.act).reduce((s, l) => s + l.amount, 0);
-    const heal = evs.filter(l => !l.detail && l.text.includes('힐')).reduce((s, l) => s + l.amount, 0);
+    const dmg = evs.filter(l => l.detail && l.detail.act && !l.detail.kind).reduce((s, l) => s + l.amount, 0);
+    const heal = evs.filter(l => l.detail && l.detail.kind === 'heal').reduce((s, l) => s + l.amount, 0);
+    const bar = evs.filter(l => l.detail && l.detail.kind === 'barrier').reduce((s, l) => s + l.amount, 0);
     return `<div class="turn"><div class="turn-h"><b class="tn-num">${tn}턴</b>
-      <span class="sum"><span class="s-val dmg">${fmt(dmg)}<em>딜</em></span>${heal ? `<span class="s-val heal">${fmt(heal)}<em>힐</em></span>` : ''}</span>
+      <span class="sum"><span class="s-val dmg">${fmt(dmg)}<em>딜</em></span>${heal ? `<span class="s-val heal">${fmt(heal)}<em>힐</em></span>` : ''}${bar ? `<span class="s-val bar">${fmt(bar)}<em>베리어</em></span>` : ''}</span>
       <span class="tn-caret">▾</span></div>
       <div class="turn-b">${renderActions(evs)}</div></div>`;
   }).join('');
@@ -649,13 +650,13 @@ function renderLog(d) {
 function renderActions(evs) {
   const acts = {};
   evs.forEach(l => (acts[l.act] ||= []).push(l));
-  const isHit = l => l.detail && l.detail.act;        // damage hit (vs flat-ATK calc buff)
+  const isHit = l => l.detail && l.detail.act && !l.detail.kind;   // 데미지 hit만 (힐/베리어는 버프라인으로)
   const KCLASS = { '필살기': 'fatal', '보통공격': 'basic', '패시브': 'passive', '방어': 'defend', '지속딜': 'dot' };
   const ally = [], hitg = [];   // 아군 행동 그룹 / 적 피격 그룹(중첩용)
   let hitTotal = 0;
   Object.keys(acts).map(Number).sort((a, b) => a - b).forEach(aid => {
     const lines = acts[aid], id = lines[0].actorId, c = CHARMAP[id];
-    const total = lines.filter(isHit).reduce((s, l) => s + l.amount, 0);
+    const total = lines.filter(isHit).reduce((s, l) => s + l.amount, 0);  // 데미지만 (isHit이 이미 제외)
     const hits = lines.filter(isHit), nd = lines.filter(l => !isHit(l));
     const kind = id ? (lines.find(l => l.kind)?.kind || '') : '';
     if (kind === '피격') {        // "더미N → [피격 아군]" — 적의 공격 묶음 안에 들어감
@@ -689,7 +690,11 @@ function renderActions(evs) {
   return html;
 }
 function renderND(l) {
-  const cls = l.text.includes('디버프') ? 'deb' : l.text.includes('버프') ? 'buf' : (l.text.includes('힐') || l.text.includes('베리어')) ? 'heal' : '';
+  // 색: 힐=초록(heal) · 베리어=회색(bar) · 버프/디버프=빨강(buf/deb)
+  const cls = l.text.includes('베리어') ? 'bar'
+    : l.text.includes('힐') ? 'heal'
+    : l.text.includes('디버프') ? 'deb'
+    : l.text.includes('버프') ? 'buf' : '';
   const text = l.text.replace(/^\S+\s/, '');
   // 고정ATK 버프 → 누르면 ATK 계산식 (각 기초ATK% 칩은 출처로 이어짐)
   if (l.detail && l.detail.calc === 'flatAtk') {
@@ -701,6 +706,27 @@ function renderND(l) {
     return `<div class="ndl ${cls} fatk">
       <div class="ndl-h">${text}<span class="ndl-caret">▾</span></div>
       <div class="ndl-calc"><b>${fmt(d.val)}</b> = (${fmt(d.base)} × (1 + ${baseAtk})) × ${pctEl} <em>자기 기초ATK의</em></div></div>`;
+  }
+  // 힐 / 베리어 → 데미지 hit처럼 풀 분해 (base × 기초ATK% × ATK% + 고정) × 계수 × 효과 …
+  if (l.detail && (l.detail.kind === 'heal' || l.detail.kind === 'barrier')) {
+    const d = l.detail;
+    let inner;
+    if (d.baseLabel === 'ATK') {
+      inner = fmt(d.base);
+      const bc = chan('기초ATK', d.baseAtk), ac = chan('ATK', d.atk);
+      if (bc) inner += ' × ' + bc;
+      if (ac) inner += ' × ' + ac;
+      if (sumv(d.flat || [])) inner += ' + ' + chan('고정', d.flat, '');
+      inner = '(' + inner + ')';
+    } else { inner = `${fmt(d.baseTotal)} ${d.baseLabel}`; }   // 최대HP 기반
+    const pctEl = l.srcId
+      ? `<span class="skchip" data-sid="${l.srcId}" data-sn="${(l.srcSkill || '').replace(/"/g, '&quot;')}">${d.skillPct}% 계수</span>`
+      : `<span class="sk">${d.skillPct}% 계수</span>`;
+    const eff = (d.eff || []).length ? ' × ' + chan('효과', d.eff) : '';
+    const recv = d.healRecv ? ` × <span class="chan-static">받는회복 +${d.healRecv}%</span>` : '';
+    return `<div class="ndl ${cls} fatk">
+      <div class="ndl-h">${text}<span class="ndl-caret">▾</span></div>
+      <div class="ndl-calc"><b>${fmt(d.final)}</b> = ${inner} × ${pctEl}${eff}${recv}</div></div>`;
   }
   const clk = l.srcId ? ` clk" data-sid="${l.srcId}" data-sn="${(l.srcSkill || '').replace(/"/g, '&quot;')}` : '';
   return `<div class="ndl ${cls}${clk}">${text}</div>`;
