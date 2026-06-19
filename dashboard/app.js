@@ -358,7 +358,7 @@ async function openModal(i) {
       <div id="plannerWrap" ${s.usePlan ? '' : 'hidden'}>
         <div class="plan-legend">
           <span>${(c.actionsPerTurn || 1) > 1
-            ? `매 턴 <b style="color:var(--gold)">${c.actionsPerTurn}회 행동</b> · 궁 자유 배치 (CD·테세 전환은 엔진 처리) · 임부언 추가행동은 평타`
+            ? `매 턴 <b style="color:var(--gold)">${c.actionsPerTurn}회 행동</b> · <b style="color:var(--gold)">궁은 턴당 1회</b> (궁궁 불가, 궁평/평궁만) · 임부언 추가행동은 평타`
             : `필살 CD <b style="color:var(--gold)">${c.fatalCd}턴</b> · 첫 사용 <b style="color:var(--gold)">${c.firstFatal}턴</b> — <b style="color:var(--gold)">궁</b>은 CD 안 찬 턴엔 비활성`}</span>
           <span class="plan-fill"><button data-fill="평">모두 평타</button><button data-fill="방">모두 방어</button></span>
         </div>
@@ -417,7 +417,12 @@ function fillPlan(meta, action, n = 30) {
   }
   return plan;                              // 이태호(apt>1): 순수 평타/방어, 자동 궁 없음
 }
-function defaultPlan(meta, n = 30) { return fillPlan(meta, '평', n); }
+function defaultPlan(meta, n = 30) {
+  const plan = fillPlan(meta, '평', n);
+  // 이태호(apt>1): 첫 행동을 궁으로 → 일지어천 진입 후 평타가 내기혼신 쌓아 데미지 (AUTO와 동일 사이클)
+  if ((meta.actionsPerTurn || 1) > 1 && meta.firstFatal <= 1) plan[0] = '궁';
+  return plan;
+}
 // CD 모델 (defend-aware). 히토하·모이루: 입질 보유(평타 후) 상태로 방어 시 필살 CD 1 감소
 // → 4턴궁을 3턴 사이클로. 궁은 입질을 제거하므로 매 사이클 평타가 다시 필요.
 function ultAvail(plan, meta) {           // ok[i] = 궁 usable on turn i+1, given the plan
@@ -488,6 +493,10 @@ function renderPlanner(s, meta) {
     const btn = e.target.closest('button'); if (!btn || btn.disabled) return;
     const idx = +btn.dataset.idx, a = btn.dataset.a;
     s.plan[idx] = a;
+    if (apt > 1 && a === '궁') {                        // 궁은 턴당 1회 — 같은 턴 다른 슬롯의 궁은 평으로
+      const ti0 = Math.floor(idx / apt);
+      for (let a2 = 0; a2 < apt; a2++) { const j = ti0 * apt + a2; if (j !== idx && s.plan[j] === '궁') s.plan[j] = '평'; }
+    }
     if (a === '궁' && meta.cdDefendReduce > 0) {       // 앞턴 방어+평타 강제 (입질 보유 방어 = CD 가속)
       enforceCdDefend(s.plan, meta, idx + 1);
       toast(`${meta.name}: 필살 CD 감소를 위해 바로 앞 턴을 <b>방어</b>로, 그 앞에 입질용 <b>평타</b>를 자동 배치했어요`);

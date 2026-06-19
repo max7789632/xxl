@@ -659,10 +659,12 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
                 if not caster.extra_granted:   # self "(only once per turn)"
                     caster.extra_actions += int(effect.magnitude)
                     caster.extra_granted = True
-            else:                              # granted to another ally (e.g. 임부언 -> P1)
-                tgt.extra_actions += int(effect.magnitude)
+            elif tgt.turn_acts > 0:            # 임부언 -> P1: 이미 행동을 마친 동료만 회복 효과.
+                tgt.extra_actions += int(effect.magnitude)   # 아직 행동 전이면 회복은 낭비(2회 안 됨)
         if targets:
-            state.record(caster.name, f"{act_kr} → {_who(targets, caster, state, effect)} 추가 행동 +{int(effect.magnitude)}", amount=0, src_id=effect.owner, src_skill=effect.src_skill)
+            granted = [t for t in targets if t is caster or t.turn_acts > 0]
+            tail = "" if granted else " (대상 행동 전 — 회복 무효)"
+            state.record(caster.name, f"{act_kr} → {_who(targets, caster, state, effect)} 추가 행동 +{int(effect.magnitude)}{tail}", amount=0, src_id=effect.owner, src_skill=effect.src_skill)
         return
 
     if kind == COND_DMG:
@@ -1128,19 +1130,6 @@ def _compute_hold_fatal(unit: Unit) -> None:
             unit.feeds_position = int(eff.target.split("_")[1])
 
 
-def _eff_priority(unit: Unit, allies: list[Unit]) -> float:
-    """Action order = the unit's priority, with one generic rule: a unit whose
-    fatal feeds an extra action to a carry (feeds_position; e.g. 임부언 -> 아누비로스)
-    defers to act right AFTER that carry on its own fatal turns, so the carry's
-    own ult lands first and the granted bonus becomes a second ult (double-ult).
-    Any per-turn order override the user sets takes precedence over this."""
-    if unit.feeds_position and unit.cd_remaining <= 0 and unit._kit.fatal.effects:  # type: ignore[attr-defined]
-        carry = next((a for a in allies if a.alive and a.slot == unit.feeds_position - 1), None)
-        if carry is not None and carry is not unit:
-            return carry.priority + 1e-4
-    return unit.priority
-
-
 def _mark_fed_carries(allies: list[Unit]) -> None:
     """One-time: mark carries that a feeder (e.g. 임부언) keeps CD-resetting, so they
     fatal on every CD-ready action (natural + the granted bonus)."""
@@ -1187,10 +1176,12 @@ def _ally_phase(allies: list[Unit], state: BattleState) -> None:
     if override:
         bypos = {u.slot: u for u in allies if u.alive}
         queue = [bypos[s] for s in override if s in bypos]
-        queue += [u for u in sorted(allies, key=lambda x: _eff_priority(x, allies))
+        queue += [u for u in sorted(allies, key=lambda x: x.priority)
                   if u.alive and u not in queue]   # any not listed -> base order, appended
     else:
-        queue = sorted([u for u in allies if u.alive], key=lambda u: _eff_priority(u, allies))
+        # 지정한 우선순위 그대로 — 임부언 같은 피더도 강제로 미루지 않는다. 사용자가 임부언을
+        # 아누비로스 뒤에 둬야 더블 궁이 되고, 앞에 두면 회복이 낭비됨(아래 EXTRA_ACTION 게이트).
+        queue = sorted([u for u in allies if u.alive], key=lambda u: u.priority)
     guard = 0
     while queue and guard < 50:
         guard += 1
