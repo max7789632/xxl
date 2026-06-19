@@ -632,7 +632,7 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
         else:
             # avoid duplicate registration when the same grant re-fires (e.g. 멍 re-ults
             # at T1 then T4): refresh, don't stack a second identical subscription.
-            once = any(child.once for child in effect.sub_effects)
+            once = effect.once or any(child.once for child in effect.sub_effects)
             dup = next((s for s in caster.subs if s.event == (cond or "")
                         and s.effects is effect.sub_effects and s.grantor is grantor), None)
             if dup is None:
@@ -723,8 +723,11 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
             # 다른 스킬의 DoT는 공존한다 (모이루 평타↔방어 도트, 최유희 도트 등 — 각각 별개 스킬).
             for tgt in targets:
                 snap = _dot_cast_snapshot(caster, tgt)   # 부여 시점 시전자 스펙 고정
+                # 같은 스킬의 서로 다른 도트 라인(최유희 궁: 단일 50% + 전체 25%)은 공존해야 하므로
+                # 마그니튜드도 키에 포함 — 같은 (스킬, 배율) 재적용만 갱신, 다른 배율은 별개 도트.
                 same = next((e for e in caster.dots if e[0] is tgt
-                             and e[3] == effect.owner and e[4] == effect.src_skill), None)
+                             and e[3] == effect.owner and e[4] == effect.src_skill
+                             and e[1] == effect.magnitude), None)
                 if same:
                     same[1] = effect.magnitude          # 같은 스킬 재적용 -> 턴·스냅샷 갱신
                     same[2] = int(effect.duration)
@@ -873,6 +876,13 @@ def _team_has_barrier(caster: Unit, state: BattleState) -> bool:
     return all(u.barrier > 0 for u in state.team(caster) if u.alive)
 
 
+def _is_poisoned(tgt: "Unit | None", state: BattleState) -> bool:
+    """대상이 중독(지속 데미지/DoT)을 보유했는가 — 누군가 이 대상에게 건 DoT가 있으면 True (최유희)."""
+    if tgt is None:
+        return False
+    return any(e[0] is tgt for u in state.allies + state.enemies for e in u.dots)
+
+
 def _fire_subs(caster: Unit, event: str, state: BattleState,
                current_target: Unit | None) -> None:
     # snapshot which gated subs qualify BEFORE firing, so same-event triggers
@@ -880,7 +890,8 @@ def _fire_subs(caster: Unit, event: str, state: BattleState,
     ready = [s for s in list(caster.subs)
              if s.event == event and _qualifies(s, caster, current_target)
              and (not s.need_team_barrier or _team_has_barrier(caster, state))
-             and (not s.once or s.armed)]          # once-sub: 장전된 동안만
+             and (not s.once or s.armed)           # once-sub: 장전된 동안만
+             and (s.target_gate_stack != "Poisoned" or _is_poisoned(current_target, state))]
     for sub in ready:
         if not state.force_proc and sub.chance < 100 and state.rng.random() * 100 >= sub.chance:
             continue
@@ -912,6 +923,8 @@ def _qualifies(sub: "Subscription", caster: Unit, target: Unit | None) -> bool:
         target_ok = True
     elif sub.target_gate_stack == "Taunt":            # 조롱은 taunt_turns로 추적
         target_ok = target is not None and target.taunt_turns > 0
+    elif sub.target_gate_stack == "Poisoned":         # 중독(DoT 보유)은 _fire_subs에서 state로 판정
+        target_ok = True
     else:
         target_ok = tgt_stacks.get(sub.target_gate_stack, 0) >= sub.target_gate_count
     return _gate_ok(caster, sub.gate_stack, sub.gate_count) and target_ok
@@ -942,7 +955,8 @@ def _fire_attack(caster: Unit, events: tuple[str, ...], state: BattleState,
     for event in events:
         for sub in [s for s in list(caster.subs)
                     if s.event == event and _qualifies(s, caster, current_target)
-                    and (not s.need_team_barrier or _team_has_barrier(caster, state))]:
+                    and (not s.need_team_barrier or _team_has_barrier(caster, state))
+                    and (s.target_gate_stack != "Poisoned" or _is_poisoned(current_target, state))]:
             if not state.force_proc and sub.chance < 100 and state.rng.random() * 100 >= sub.chance:
                 continue
             src = "basic" if sub.gate_stack in BASIC_JUDGED_STACKS else "trigger"

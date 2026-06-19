@@ -23,7 +23,7 @@ from woofia_sim.names import kr, stat_kr                    # noqa: E402
 _DATA = Path(__file__).resolve().parents[1] / "data"
 CHARS = json.loads((_DATA / "chars.json").read_text(encoding="utf-8"))
 SKILLS = json.loads((_DATA / "skills.json").read_text(encoding="utf-8"))
-IDS = [c for c in sorted(int(k) for k in CHARS) if 10401 <= c <= 10436]
+IDS = sorted(int(k) for k in CHARS)   # 전체 캐릭터 (XXL 34 + XL 최유희 10303 등)
 
 SLOT_KR = {"basicAtk": "평타", "ultimate": "필살", "sigil": "룬필살",
            "passive0": "패시브1", "passive1": "패시브2", "passive2": "패시브3",

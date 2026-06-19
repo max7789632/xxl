@@ -406,5 +406,17 @@
   "baseATK": 532,
   "baseHP": 2347,
   "hasRune": true
+ },
+ "10303": {
+  "id": 10303,
+  "name_en": "Choi Yuhee",
+  "name_kr": "최유희",
+  "feature": "Wood DoT / Poison",
+  "rarity": 3,
+  "class": 5,
+  "element": 3,
+  "baseATK": 498,
+  "baseHP": 2261,
+  "hasRune": true
  }
 }

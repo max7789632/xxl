@@ -155,6 +155,11 @@ _HIT_HP = re.compile(rf"^[Ww]hen hitting target\(s\) with HP (<|≥|≧|>) {_NUM
 # used a given action this turn. role = Fighter/Vandal/'' (all); action = basic/EX.
 _ALL_ACTED = re.compile(rf"^Except self, when all of own (Fighter |Vandal |)Buddies use (?:a Basic Attack|an EX Skill),\s*(?:there is a(?:\(n\))? {_NUM}% chance to )?(?:trigger: )?(.+)$")
 
+# 최유희 공포의 바람 속격: 평타가 중독(DoT) 보유 대상 적중 시 추가딜 (target 게이트 = Poisoned)
+_POISON_HIT = re.compile(rf"^If Basic Attack target\(s\) is/are Poisoned \(DoT\), there is a(?:\(n\))? {_NUM}% chance to trigger: (.+)$")
+# 최유희 독설 반격: 방어 후 평타 피격 시 확률 도트 (1턴 무장 = 방어마다 1회)
+_DEFEND_COUNTER = re.compile(rf"^When taking a Basic Attack, there is a(?:\(n\))? {_NUM}% chance to (.+?), for {_NUM} turn\(s\)\.?$")
+
 
 def _apply_hp_gate(eff: "Effect", op: str, val: float) -> None:
     """Tag the LEAF effects (not the trigger wrappers) so each only applies while the
@@ -854,6 +859,19 @@ def parse_line(line: str) -> Effect:
             event = _GATE_EVENT.get(twm.group(2)) if twm.group(2) else "on_attack"
             return Effect(TRIGGER, line, condition=event,
                           target_stack=_stk(twm.group(1)), target_count=1, sub_effects=subs)
+    pm = _POISON_HIT.match(line)              # 최유희: 평타가 중독(DoT) 대상 적중 시 추가딜
+    if pm:
+        subs = [parse_line(c) for c in _split_clauses(pm.group(2))]
+        if any(s.parsed for s in subs):
+            return Effect(TRIGGER, line, condition="on_basic_attack", chance=_f(pm.group(1)),
+                          target_stack="Poisoned", target_count=1, sub_effects=subs)
+    dcm = _DEFEND_COUNTER.match(line)         # 최유희: 평타 피격 시 확률 도트 (방어마다 1회 무장)
+    if dcm:
+        body = dcm.group(2)
+        inner = parse_line(body[:1].upper() + body[1:])
+        if inner.parsed:
+            return Effect(TRIGGER, line, condition="on_take_basic", chance=_f(dcm.group(1)),
+                          once=True, sub_effects=[inner])
     ecm = _ECOUNT.match(line)
     if ecm:
         op = {"≧": "ge", ">=": "ge", "≦": "le", "<=": "le", "=": "eq"}[ecm.group(1)]
