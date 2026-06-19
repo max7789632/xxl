@@ -815,10 +815,22 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
                 # the stack back down to 1 (열화질보·물보라).
                 if effect.max_stacks > 1:
                     tgt.stack_caps[name] = max(tgt.stack_caps.get(name, 0), effect.max_stacks)
-                cap = max(tgt.stack_caps.get(name, 0), effect.max_stacks)
-                tgt.stacks[name] = max(0, min(cur + delta, cap))
-                # set/refresh lifetime (no duration -> permanent state stack)
-                tgt.stack_turns[name] = _half_turns(effect.duration) if effect.duration > 0 else -1
+                cap = max(tgt.stack_caps.get(name, 0), effect.max_stacks, 1)
+                if effect.duration > 0:
+                    # 타이머 스택: 중첩마다 개별 수명. 재적용해도 기존 중첩의 남은 시간은 유지되고
+                    # 각자 만료된다(전체 리셋 X). 오봉만상을 3턴 간격 방어로 무한 유지하던 버그 수정.
+                    timers = list(tgt.stack_turns[name]) if isinstance(tgt.stack_turns.get(name), list) else []
+                    if delta > 0:
+                        timers.extend([_half_turns(effect.duration)] * delta)
+                        if len(timers) > cap:
+                            timers = timers[len(timers) - cap:]   # 초과분은 가장 오래된 것부터 밀어냄
+                    elif delta < 0:
+                        timers = timers[:max(0, len(timers) + delta)]
+                    tgt.stack_turns[name] = timers
+                    tgt.stacks[name] = len(timers)
+                else:                                  # 영구 상태 스택 (각흔·화약 등) — 카운트 직접 관리
+                    tgt.stacks[name] = max(0, min(cur + delta, cap))
+                    tgt.stack_turns[name] = -1
         if source != "passive" and targets and fired:
             who = _who(targets, caster, state, effect)
             amt = "제거" if effect.magnitude <= -9000 else f"{(int(effect.magnitude) or 1):+d}중첩"
@@ -1160,12 +1172,21 @@ def _tick_buffs(state: BattleState) -> None:
         unit.buffs = kept
         for name in list(unit.stack_turns):
             t = unit.stack_turns[name]
-            if t < 0:
+            if isinstance(t, list):      # 타이머 스택: 중첩마다 개별 만료
+                t = [x - 1 for x in t if x - 1 > 0]
+                if t:
+                    unit.stack_turns[name] = t
+                    unit.stacks[name] = len(t)
+                else:
+                    unit.stacks[name] = 0
+                    del unit.stack_turns[name]
+            elif t < 0:
                 continue                 # permanent state stack
-            unit.stack_turns[name] = t - 1
-            if unit.stack_turns[name] <= 0:
-                unit.stacks[name] = 0
-                del unit.stack_turns[name]
+            else:
+                unit.stack_turns[name] = t - 1
+                if unit.stack_turns[name] <= 0:
+                    unit.stacks[name] = 0
+                    del unit.stack_turns[name]
 
 
 def _tick_hots(state: BattleState) -> None:
