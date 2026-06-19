@@ -236,20 +236,29 @@ function makeDraggable(list, onReorder) {
     });
   });
 }
+function mvArrows(k, len) {   // 터치용 위/아래 버튼 (드래그가 안 되는 모바일 대비)
+  return `<span class="mv-col">
+    <button class="mv" data-mv="up" data-k="${k}"${k === 0 ? ' disabled' : ''} aria-label="위로">▲</button>
+    <button class="mv" data-mv="dn" data-k="${k}"${k === len - 1 ? ' disabled' : ''} aria-label="아래로">▼</button></span>`;
+}
 function renderPrio() {
   const ord = teamOrder();
   $('#prio').innerHTML = ord.map((o, k) => {
     const c = CHARS[o.s.id], cust = o.s.priority != null;
     return `<li class="${cust ? 'cust' : ''}" draggable="true"><span class="ord">${k + 1}</span>
       <img class="pic el-${c.elementKey}" src="${icon(o.s.id)}" alt="" draggable="false">
-      <span class="nm">${c.name}</span><span class="grip">⠿</span></li>`;
+      <span class="nm">${c.name}</span>${mvArrows(k, ord.length)}</li>`;
   }).join('');
+  const apply = arr => { arr.forEach((o, k) => o.s.priority = k + 1); renderPrio(); };
   makeDraggable($('#prio'), (from, to) => {
-    const arr = teamOrder();
-    const [m] = arr.splice(from, 1); arr.splice(to, 0, m);
-    arr.forEach((o, k) => o.s.priority = k + 1);   // lock explicit order
-    renderPrio();
+    const arr = teamOrder(); const [m] = arr.splice(from, 1); arr.splice(to, 0, m); apply(arr);
   });
+  $('#prio').onclick = e => {
+    const b = e.target.closest('.mv'); if (!b) return;
+    const arr = teamOrder(), k = +b.dataset.k, to = b.dataset.mv === 'up' ? k - 1 : k + 1;
+    if (to < 0 || to >= arr.length) return;
+    const [m] = arr.splice(k, 1); arr.splice(to, 0, m); apply(arr);
+  };
   renderTurnChips();
 }
 function renderTurnChips() {
@@ -279,13 +288,18 @@ function renderTurnEditor() {
   ed.innerHTML = `<div class="te-head"><b>${label}</b> 행동 순서 — ${anyHas ? '변경됨' : '기본 따름'}${sel.length > 1 ? ' <em>같은 순서로 일괄 적용</em>' : ''}</div>
     <ol class="prio">${ord.map((p, k) => { const c = CHARS[team[p - 1].id];
       return `<li draggable="true"><span class="ord">${k + 1}</span><img class="pic el-${c.elementKey}" src="${icon(team[p - 1].id)}" alt="" draggable="false">
-        <span class="nm">${c.name}</span><span class="grip">⠿</span></li>`; }).join('')}</ol>
+        <span class="nm">${c.name}</span>${mvArrows(k, ord.length)}</li>`; }).join('')}</ol>
     ${anyHas ? '<button class="btn-ghost sm" id="clearTurn">선택 턴 기본값으로</button>' : ''}`;
+  const applyTurn = () => { sel.forEach(t => turnOverrides[t] = [...ord]); renderTurnChips(); };
   makeDraggable(ed.querySelector('.prio'), (from, to) => {
-    const [m] = ord.splice(from, 1); ord.splice(to, 0, m);
-    sel.forEach(t => turnOverrides[t] = [...ord]);   // 선택된 모든 턴에 동일 적용
-    renderTurnChips();
+    const [m] = ord.splice(from, 1); ord.splice(to, 0, m); applyTurn();
   });
+  ed.querySelector('.prio').onclick = e => {
+    const b = e.target.closest('.mv'); if (!b) return;
+    const k = +b.dataset.k, to = b.dataset.mv === 'up' ? k - 1 : k + 1;
+    if (to < 0 || to >= ord.length) return;
+    const [m] = ord.splice(k, 1); ord.splice(to, 0, m); applyTurn();
+  };
   const ct = $('#clearTurn'); if (ct) ct.onclick = () => { sel.forEach(t => delete turnOverrides[t]); renderTurnChips(); };
 }
 $('#prioReset').onclick = () => { team.forEach(s => { if (s) delete s.priority; }); turnOverrides = {}; selTurns.clear(); renderPrio(); };
