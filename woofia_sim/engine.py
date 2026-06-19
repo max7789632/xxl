@@ -212,12 +212,13 @@ class Unit:
         return m
 
     def incoming_mult(self, attacker_element: int = 0) -> float:
-        """Target-side multiplier from damage-taken% debuffs. Element-tagged ones
-        (e.g. 아누비로스's 'Dark damage taken +7.5%') only apply to that element's
-        attacker; generic ones (element 0) apply to all."""
-        total = sum(b.value for b in self.buffs if b.stat == STAT_DMG_TAKEN
-                    and (b.element == 0 or b.element == attacker_element))
-        return max(0.0, 1 + total / 100)
+        """Target-side multiplier from damage-taken% debuffs. 게임은 일반 받뎀증
+        (GetDamagedBonusRate)과 속성 받뎀증(GetPropertyDamageRate·propertyBeDamagedEffect)을
+        별개 채널로 두고 곱한다(곱연산). 속성 받뎀증은 공격자 속성이 맞을 때만 적용."""
+        generic = sum(b.value for b in self.buffs if b.stat == STAT_DMG_TAKEN and b.element == 0)
+        prop = sum(b.value for b in self.buffs if b.stat == STAT_DMG_TAKEN
+                   and b.element != 0 and b.element == attacker_element)
+        return max(0.0, (1 + generic / 100) * (1 + prop / 100))
 
     def support_mult(self, action: str) -> float:
         """Heal/barrier scale with the action-effect channel only (평타뎀/EX효과/
