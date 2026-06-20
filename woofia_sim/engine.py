@@ -587,13 +587,22 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
             for sub in effect.sub_effects:
                 apply_effect(sub, caster, state, current_target, source, grantor)
         elif cond == "grant_allies":
-            # buddies GAIN the sub-trigger; it buffs the grantor (caster) when it fires
+            # buddies GAIN the sub-trigger; it buffs the grantor (caster) when it fires.
+            # 직접 효과(스택/버프)를 아군 전체에 즉시 부여하는 경우(이태호 오봉만상 등)는
+            # 아군 수만큼 "자신 X" 로그가 반복되므로, 첫 아군 로그를 "아군 전체"로 합치고
+            # 나머지 아군은 동일 효과라 로그를 생략한다(트리거 설치는 로그가 없어 무영향).
             exclude_self = "Except self" in (effect.raw or "")
-            for ally in state.team(caster):
-                if exclude_self and ally is caster:
-                    continue
+            recipients = [a for a in state.team(caster)
+                          if not (exclude_self and a is caster)]
+            for idx, ally in enumerate(recipients):
+                before = len(state.log)
                 for sub in effect.sub_effects:
                     apply_effect(sub, ally, state, current_target, source, grantor=caster)
+                if idx == 0:
+                    for ev in state.log[before:]:
+                        ev.text = ev.text.replace("자신", "아군 전체", 1)
+                else:
+                    del state.log[before:]
         elif cond and cond.startswith("enemy_gate:"):
             # enemy-count gate (vs the current dummy count): apply inner only if met
             _, op, n = cond.split(":")
@@ -706,6 +715,7 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
         return
 
     if kind == EXTRA_ACTION:
+        self_already = caster.extra_granted     # 호출 전 상태 (이태호 2번째 행동 판별용)
         for tgt in targets:
             if tgt is caster:
                 if not caster.extra_granted:   # self "(only once per turn)"
@@ -713,7 +723,9 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
                     caster.extra_granted = True
             elif tgt.turn_acts > 0:            # 임부언 -> P1: 이미 행동을 마친 동료만 회복 효과.
                 tgt.extra_actions += int(effect.magnitude)   # 아직 행동 전이면 회복은 낭비(2회 안 됨)
-        if targets:
+        # self 추가행동이 이번 턴 이미 부여됐으면(이태호 2번째 행동) 재부여 안 되므로 로그 생략
+        self_only = bool(targets) and all(t is caster for t in targets)
+        if targets and not (self_only and self_already):
             granted = [t for t in targets if t is caster or t.turn_acts > 0]
             tail = "" if granted else " (대상 행동 전 — 회복 무효)"
             state.record(caster.name, f"{act_kr} → {_who(targets, caster, state, effect)} 추가 행동 +{int(effect.magnitude)}{tail}", amount=0, src_id=effect.owner, src_skill=effect.src_skill)
