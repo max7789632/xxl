@@ -150,7 +150,7 @@ class Unit:
     barrier_done: float = 0.0       # total barrier granted
     barrier: float = 0.0            # current shield amount
     taunt_turns: int = 0            # 조롱: >0이면 적이 이 아군을 강제 타격 (쿠모야마)
-    hots: list = field(default_factory=list)  # [target, per_turn, turns_left] heal-over-time
+    hots: list = field(default_factory=list)  # [target, per_turn, turns_left, calc] heal-over-time
     dots: list = field(default_factory=list)  # [target, pct, turns_left, owner, src_skill, cast_snapshot] 지속딜(DoT)
     cond_buffs: list = field(default_factory=list)  # (stack,stat,value,owner,skill,scaled,thresh) while stacks≥thresh
     stack_caps: dict = field(default_factory=dict)  # stack_name -> max count (from its definition line)
@@ -904,7 +904,16 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
             }
             # 로그 텍스트는 버프 라인처럼 간결하게, 계산식은 detail(드릴다운)에
             if effect.duration and effect.duration > 0:     # heal-over-time
-                caster.hots.append([tgt, per, effect.duration])
+                # 같은 스킬·대상의 지속힐 재적용은 갱신(중첩 X) — DoT와 동일. 맹씨 취심신왕처럼
+                # 매 평타로 재설치되는 HoT가 인스턴스 누적되던 버그 수정.
+                same = next((h for h in caster.hots if len(h) > 3 and h[0] is tgt
+                             and h[3].get("skillId") == effect.owner
+                             and h[3].get("skillName") == effect.src_skill
+                             and h[3].get("skillPct") == effect.magnitude), None)
+                if same:
+                    same[1], same[2], same[3] = per, effect.duration, struct
+                else:
+                    caster.hots.append([tgt, per, effect.duration, struct])
                 state.record(caster.name,
                              f"{act_kr} 지속힐 → {tgt.name} +{per:,.0f}/턴 ({effect.duration}턴)",
                              src_id=effect.owner, src_skill=effect.src_skill,
@@ -1324,13 +1333,22 @@ def _tick_buffs(state: BattleState) -> None:
 def _tick_hots(state: BattleState) -> None:
     """Apply heal-over-time once per turn and decrement their remaining turns."""
     for u in state.allies + state.enemies:
+        if not u.hots:
+            continue
+        state.cur_action += 1                          # group this unit's HoT ticks together
+        state.cur_actor_id = getattr(u._kit, "char_id", 0)   # 직전 행동 컨텍스트 상속 방지
+        state.cur_action_kind = "지속힐"
         kept = []
         for entry in u.hots:
-            tgt, per, turns = entry
+            tgt, per, turns = entry[0], entry[1], entry[2]
+            calc = entry[3] if len(entry) > 3 else None    # 설치 시점 계산식(드릴다운)
             if tgt.alive:
                 tgt.hp = min(tgt.max_hp, tgt.hp + per)
                 u.healing_done += per
-                state.record(u.name, f"지속힐 → {tgt.name} {per:,.2f}")
+                state.record(u.name, f"지속힐 → {tgt.name} {per:,.2f}",
+                             src_id=(calc or {}).get("skillId", 0),
+                             src_skill=(calc or {}).get("skillName", ""),
+                             detail=calc)
             entry[2] = turns - 1
             if entry[2] > 0:
                 kept.append(entry)

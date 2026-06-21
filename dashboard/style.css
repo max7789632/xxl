@@ -345,9 +345,23 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .hist-item input{width:16px;height:16px;flex:none;accent-color:var(--gold);cursor:pointer}
 .hist-item .hi-label{flex:1;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hist-item .hi-date{font-size:11px;color:var(--faint);flex:none;font-variant-numeric:tabular-nums}
-.hist-item .hi-del{flex:none;width:22px;height:22px;border-radius:6px;border:1px solid transparent;background:transparent;
-  color:var(--faint);cursor:pointer;font-size:12px;transition:.12s}
-.hist-item .hi-del:hover{background:rgba(255,122,107,.14);border-color:rgba(255,122,107,.3);color:var(--bad)}
+.hist-item .hi-menu{flex:none;width:24px;height:24px;border-radius:6px;border:1px solid transparent;background:transparent;
+  color:var(--faint);cursor:pointer;font-size:15px;line-height:1;transition:.12s}
+.hist-item .hi-menu:hover{background:var(--panel2);border-color:var(--line2);color:var(--text2)}
+.hist-item.pinned{background:rgba(232,184,75,.07)}
+.hist-filter{display:flex;gap:8px;margin-bottom:10px}
+.hist-filter input{flex:1;font:inherit;font-size:12.5px;color:var(--text);background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.hist-filter input:focus{outline:none;border-color:var(--gold-d)}
+.hist-filter select{font:inherit;font-size:12px;color:var(--text2);background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:7px 9px;cursor:pointer}
+.histmenu{position:fixed;z-index:200;display:flex;flex-direction:column;gap:2px;padding:5px;
+  background:var(--panel);border:1px solid var(--line2);border-radius:9px;box-shadow:0 8px 26px rgba(0,0,0,.4)}
+.histmenu button{font:inherit;font-size:12.5px;text-align:left;white-space:nowrap;color:var(--text);
+  background:transparent;border:none;border-radius:6px;padding:7px 12px;cursor:pointer}
+.histmenu button:hover{background:var(--panel2)}
+.histmenu button.danger:hover{background:rgba(255,122,107,.14);color:var(--bad)}
+.histmenu button[disabled]{opacity:.4;cursor:not-allowed}
 .hist-empty{text-align:center;color:var(--faint);font-size:12.5px;padding:34px 0}
 .hist-actions{display:flex;gap:9px;margin-top:14px}
 .btn-danger{flex:1;font:inherit;font-size:13px;font-weight:600;padding:10px;border-radius:10px;cursor:pointer;transition:.12s;

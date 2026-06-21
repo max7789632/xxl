@@ -51,6 +51,27 @@ let lastResult = null;
 // ── 기록(캐시) 시스템 ──
 const HKEY = 'woofia_history';
 let simHistory = [];
+let histSort = 'date';     // date | date-asc | name | dmg
+let histSearch = '';
+const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+function trimHistory() {            // 40개 한도 — 잠금·핀 기록은 보호, 오래된 비보호부터 제거
+  while (simHistory.length > 40) {
+    let idx = -1;
+    for (let i = simHistory.length - 1; i >= 0; i--) if (!simHistory[i].locked && !simHistory[i].pinned) { idx = i; break; }
+    if (idx < 0) break;
+    simHistory.splice(idx, 1);
+  }
+}
+function histView() {               // 검색 필터 + 정렬 + 핀 상단고정
+  const q = histSearch.trim().toLowerCase();
+  const arr = simHistory.filter(r => !q || (r.name || r.label).toLowerCase().includes(q));
+  const cmp = { date: (a, b) => b.id - a.id, 'date-asc': (a, b) => a.id - b.id,
+    name: (a, b) => (a.name || a.label).localeCompare(b.name || b.label, 'ko'),
+    dmg: (a, b) => (b.total || 0) - (a.total || 0) }[histSort] || ((a, b) => b.id - a.id);
+  arr.sort(cmp);
+  arr.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));   // 핀 먼저 (안정 정렬)
+  return arr;
+}
 function loadHistory() {
   try {
     simHistory = JSON.parse(localStorage.getItem(HKEY) || '[]');
@@ -78,15 +99,15 @@ function saveRecord(snap, data) {
   const label = `${names} · ${data.meta.turns}턴 · ${fmtShort(data.meta.total)}`;
   // 결과(data)는 저장하지 않는다 — 전투로그 포함 시 1건이 ~750KB라 localStorage(~5MB)가 금방 초과돼
   // setItem이 조용히 실패(새 기록 미저장)했음. 설정(snap)만 저장하고, 복원 시 재실행(시드 고정 = 동일 결과).
-  simHistory.unshift({ id: Date.now(), label, snap });
-  if (simHistory.length > 40) simHistory.length = 40;
+  simHistory.unshift({ id: Date.now(), label, snap, total: data.meta.total || 0 });
+  trimHistory();
   persistHistory();
   renderHistory(simHistory[0].id);
 }
 function renderHistory(selId) {
   const sel = $('#history'); if (!sel) return;
   sel.innerHTML = simHistory.length
-    ? simHistory.map(r => `<option value="${r.id}"${r.id === selId ? ' selected' : ''}>${r.label}</option>`).join('')
+    ? histView().map(r => `<option value="${r.id}"${r.id === selId ? ' selected' : ''}>${(r.pinned ? '📌' : '') + (r.locked ? '🔒' : '')}${esc(r.name || r.label)}</option>`).join('')
     : '<option value="">— 기록 없음 —</option>';
 }
 function setSeg(id, val) {
@@ -112,12 +133,14 @@ function restoreRecord(rec) {
 }
 function renderHistList() {
   const list = $('#histList'); if (!list) return;
-  list.innerHTML = simHistory.length ? simHistory.map(r => {
+  const view = histView();
+  list.innerHTML = view.length ? view.map(r => {
     const d = new Date(r.id).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `<label class="hist-item"><input type="checkbox" data-id="${r.id}">
-      <span class="hi-label">${r.label}</span><span class="hi-date">${d}</span>
-      <button class="hi-del" data-del="${r.id}" title="이 기록 삭제">✕</button></label>`;
-  }).join('') : '<div class="hist-empty">저장된 기록이 없습니다</div>';
+    const mark = `${r.pinned ? '📌' : ''}${r.locked ? '🔒' : ''}`;
+    return `<label class="hist-item${r.pinned ? ' pinned' : ''}"><input type="checkbox" data-id="${r.id}">
+      <span class="hi-label">${mark}${esc(r.name || r.label)}</span><span class="hi-date">${d}</span>
+      <button class="hi-menu" data-menu="${r.id}" title="관리">⋮</button></label>`;
+  }).join('') : `<div class="hist-empty">${histSearch ? '검색 결과 없음' : '저장된 기록이 없습니다'}</div>`;
   updateHselCount();
 }
 function selectedHistIds() { return new Set([...$$('#histList input:checked')].map(c => +c.dataset.id)); }
@@ -135,20 +158,84 @@ function bindHistory() {
   $('#hNone').onclick = () => { $$('#histList input').forEach(c => c.checked = false); updateHselCount(); };
   $('#histList').onchange = updateHselCount;
   $('#histList').onclick = e => {
-    const b = e.target.closest('.hi-del'); if (!b) return;
+    const mb = e.target.closest('.hi-menu'); if (!mb) return;
     e.preventDefault();
-    simHistory = simHistory.filter(r => r.id != b.dataset.del); afterHistChange();
+    const r = simHistory.find(x => x.id == mb.dataset.menu); if (r) openHistMenu(mb, r);
   };
+  const sb = $('#histSearch'); if (sb) sb.oninput = () => { histSearch = sb.value; renderHistList(); };
+  const so = $('#histSort'); if (so) so.onchange = () => { histSort = so.value; renderHistList(); };
+  $('#hExport') && ($('#hExport').onclick = exportHistory);
+  $('#hImport') && ($('#hImport').onclick = () => $('#hImportFile').click());
+  $('#hImportFile') && ($('#hImportFile').onchange = importHistory);
   $('#hDelSel').onclick = () => {
-    const ids = selectedHistIds(); if (!ids.size) return;
-    if (!confirm(`선택한 ${ids.size}개 기록을 삭제할까요?`)) return;
-    simHistory = simHistory.filter(r => !ids.has(r.id)); afterHistChange();
+    const ids = selectedHistIds();
+    const del = simHistory.filter(r => ids.has(r.id) && !r.locked);
+    if (!del.length) return toast('삭제할 기록이 없어요 (잠긴 기록은 제외돼요)');
+    if (!confirm(`선택한 ${del.length}개를 삭제할까요? (잠긴 기록 제외)`)) return;
+    const dset = new Set(del.map(r => r.id));
+    simHistory = simHistory.filter(r => !dset.has(r.id)); afterHistChange();
   };
   $('#hDelOther').onclick = () => {
     const ids = selectedHistIds(); if (!ids.size) return;
-    if (!confirm(`선택한 ${ids.size}개만 남기고 나머지 ${simHistory.length - ids.size}개를 삭제할까요?`)) return;
-    simHistory = simHistory.filter(r => ids.has(r.id)); afterHistChange();
+    const del = simHistory.filter(r => !ids.has(r.id) && !r.locked);
+    if (!del.length) return toast('삭제할 기록이 없어요');
+    if (!confirm(`선택 ${ids.size}개 + 잠긴 기록만 남기고 ${del.length}개를 삭제할까요?`)) return;
+    const dset = new Set(del.map(r => r.id));
+    simHistory = simHistory.filter(r => !dset.has(r.id)); afterHistChange();
   };
+}
+function openHistMenu(btn, r) {
+  document.querySelector('.histmenu')?.remove();
+  const m = document.createElement('div');
+  m.className = 'histmenu';
+  m.innerHTML = `<button data-act="rename">✏️ 이름 변경</button>
+    <button data-act="pin">${r.pinned ? '📌 고정 해제' : '📌 상단 고정'}</button>
+    <button data-act="lock">${r.locked ? '🔓 잠금 해제' : '🔒 잠금'}</button>
+    <button data-act="del" class="danger"${r.locked ? ' disabled' : ''}>🗑️ 삭제</button>`;
+  document.body.appendChild(m);
+  const rect = btn.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(rect.right - m.offsetWidth, innerWidth - m.offsetWidth - 10)) + 'px';
+  m.style.top = (rect.bottom + 4) + 'px';
+  m.onclick = e => {
+    const act = e.target.closest('button')?.dataset.act; if (!act) return;
+    if (act === 'rename') { const nn = prompt('새 이름 (비우면 기본 이름)', r.name || r.label); if (nn !== null) { r.name = nn.trim() || undefined; afterHistChange(); } }
+    else if (act === 'pin') { r.pinned = !r.pinned; afterHistChange(); }
+    else if (act === 'lock') { r.locked = !r.locked; afterHistChange(); }
+    else if (act === 'del') { if (r.locked) return; simHistory = simHistory.filter(x => x.id !== r.id); afterHistChange(); }
+    m.remove();
+  };
+  setTimeout(() => document.addEventListener('click', function h(ev) {
+    if (!m.contains(ev.target) && ev.target !== btn) { m.remove(); document.removeEventListener('click', h); }
+  }), 0);
+}
+function exportHistory() {
+  const ids = selectedHistIds();
+  const out = ids.size ? simHistory.filter(r => ids.has(r.id)) : simHistory;   // 선택 있으면 선택분만, 없으면 전체
+  if (!out.length) return toast('내보낼 기록이 없어요');
+  const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `woofia_records_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+  toast(`기록 ${out.length}개를 파일로 내보냈어요${ids.size ? ' (선택분)' : ''}`);
+}
+function importHistory(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const arr = JSON.parse(reader.result);
+      if (!Array.isArray(arr)) throw 0;
+      const have = new Set(simHistory.map(r => r.id));
+      const add = arr.filter(r => r && r.id && r.snap && !have.has(r.id));
+      simHistory = [...simHistory, ...add];
+      simHistory.sort((a, b) => b.id - a.id);
+      trimHistory(); afterHistChange();
+      toast(`${add.length}개 기록을 가져왔어요 (중복 제외)`);
+    } catch { toast('가져오기 실패 — 올바른 기록 파일이 아니에요'); }
+    e.target.value = '';
+  };
+  reader.readAsText(f);
 }
 
 // 마지막 업데이트(배포) 시각 — version.json(배포 시 기록)을 읽어 우측 하단에 KST로 표시

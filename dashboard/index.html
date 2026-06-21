@@ -121,9 +121,21 @@
   <div class="modal-bg" data-hclose></div>
   <div class="hist-card">
     <div class="hist-head"><h3>기록 관리</h3><button class="mc-close" data-hclose>×</button></div>
+    <div class="hist-filter">
+      <input type="text" id="histSearch" placeholder="이름 검색…" autocomplete="off">
+      <select id="histSort">
+        <option value="date">최신순</option>
+        <option value="date-asc">오래된순</option>
+        <option value="name">이름순</option>
+        <option value="dmg">총딜순</option>
+      </select>
+    </div>
     <div class="hist-tools">
       <button id="hAll" class="btn-ghost sm">모두 선택</button>
       <button id="hNone" class="btn-ghost sm">모두 해제</button>
+      <button id="hExport" class="btn-ghost sm">내보내기</button>
+      <button id="hImport" class="btn-ghost sm">가져오기</button>
+      <input type="file" id="hImportFile" accept="application/json" hidden>
       <span class="hsel-count" id="hselCount">0개 선택</span>
     </div>
     <div class="hist-list" id="histList"></div>
