@@ -51,6 +51,7 @@ let lastResult = null;
 // ── 기록(캐시) 시스템 ──
 const HKEY = 'woofia_history';
 let simHistory = [];
+let activeRecId = null;   // 현재 UI에 로드된 기록 id (없으면 null = 작업 중 상태)
 let histSort = 'date';     // date | date-asc | name | dmg
 let histSearch = '';
 const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
@@ -103,15 +104,17 @@ function saveRecord(snap, data) {
   // 결과(data)는 저장하지 않는다 — 전투로그 포함 시 1건이 ~750KB라 localStorage(~5MB)가 금방 초과돼
   // setItem이 조용히 실패(새 기록 미저장)했음. 설정(snap)만 저장하고, 복원 시 재실행(시드 고정 = 동일 결과).
   simHistory.unshift({ id: Date.now(), label, snap, total: data.meta.total || 0 });
+  activeRecId = simHistory[0].id;     // 방금 시뮬한 결과 = 현재 UI와 일치
   trimHistory();
   persistHistory();
-  renderHistory(simHistory[0].id);
+  renderHistory(activeRecId);
 }
 function renderHistory(selId) {
   const sel = $('#history'); if (!sel) return;
-  sel.innerHTML = simHistory.length
-    ? histView().map(r => `<option value="${r.id}"${r.id === selId ? ' selected' : ''}>${(r.pinned ? '📌' : '') + (r.locked ? '🔒' : '')}${esc(r.name || r.label)}</option>`).join('')
-    : '<option value="">— 기록 없음 —</option>';
+  if (!simHistory.length) { sel.innerHTML = '<option value="">— 기록 없음 —</option>'; return; }
+  const has = selId != null && simHistory.some(r => r.id == selId);   // 로드된 기록이 목록에 있나
+  const opts = histView().map(r => `<option value="${r.id}"${r.id == selId ? ' selected' : ''}>${(r.pinned ? '📌' : '') + (r.locked ? '🔒' : '')}${esc(r.name || r.label)}</option>`).join('');
+  sel.innerHTML = (has ? '' : '<option value="" selected>— 불러올 기록 선택 —</option>') + opts;
 }
 function setSeg(id, val) {
   const seg = $('#' + id); if (!seg) return;
@@ -119,6 +122,7 @@ function setSeg(id, val) {
   seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v == val));
 }
 function restoreRecord(rec) {
+  activeRecId = rec.id;       // 이 기록을 UI에 로드 → 선택 상태로 추적
   const s = rec.snap;
   team = s.team.map(x => x ? JSON.parse(JSON.stringify(x)) : null);
   turnOverrides = JSON.parse(JSON.stringify(s.turnOverrides || {}));
@@ -153,7 +157,7 @@ function updateHselCount() {
   $('#hDelSel').disabled = $('#hDelOther').disabled = !n;
   const ex = $('#hExport'); if (ex) ex.disabled = !n;   // 선택 없으면 내보내기 불가
 }
-function afterHistChange() { persistHistory(); renderHistList(); renderHistory(simHistory[0]?.id); }
+function afterHistChange() { persistHistory(); renderHistList(); renderHistory(activeRecId); }   // 로드된 기록 선택 유지(가져오기로 강제 점프 안 함)
 function bindHistory() {
   $('#history').onchange = e => { const r = simHistory.find(x => x.id == e.target.value); if (r) restoreRecord(r); };
   $('#histManage').onclick = () => { renderHistList(); $('#histModal').hidden = false; };
