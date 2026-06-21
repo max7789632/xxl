@@ -119,7 +119,7 @@ function restoreRecord(rec) {
   const s = rec.snap;
   team = s.team.map(x => x ? JSON.parse(JSON.stringify(x)) : null);
   turnOverrides = JSON.parse(JSON.stringify(s.turnOverrides || {}));
-  selTurns = new Set();
+  selTurns = autoSelOverrides(turnOverrides);   // 설정된 턴 오버라이드 자동 표시
   forceProc = !!s.forceProc;
   const tr = $('#turns'); tr.value = s.turns; tr.dispatchEvent(new Event('input'));
   const rr = $('#runs'); if (rr) { rr.value = s.runs ?? 50; rr.dispatchEvent(new Event('input')); }
@@ -148,6 +148,7 @@ function updateHselCount() {
   const n = selectedHistIds().size;
   $('#hselCount').textContent = `${n}개 선택 / 전체 ${simHistory.length}`;
   $('#hDelSel').disabled = $('#hDelOther').disabled = !n;
+  const ex = $('#hExport'); if (ex) ex.disabled = !n;   // 선택 없으면 내보내기 불가
 }
 function afterHistChange() { persistHistory(); renderHistList(); renderHistory(simHistory[0]?.id); }
 function bindHistory() {
@@ -164,8 +165,8 @@ function bindHistory() {
   };
   const sb = $('#histSearch'); if (sb) sb.oninput = () => { histSearch = sb.value; renderHistList(); };
   const so = $('#histSort'); if (so) so.onchange = () => { histSort = so.value; renderHistList(); };
-  $('#hExport') && ($('#hExport').onclick = exportHistory);
-  $('#hImport') && ($('#hImport').onclick = () => $('#hImportFile').click());
+  $('#hExport') && ($('#hExport').onclick = openExportPop);
+  $('#hImport') && ($('#hImport').onclick = openImportPop);
   $('#hImportFile') && ($('#hImportFile').onchange = importHistory);
   $('#hDelSel').onclick = () => {
     const ids = selectedHistIds();
@@ -208,32 +209,72 @@ function openHistMenu(btn, r) {
     if (!m.contains(ev.target) && ev.target !== btn) { m.remove(); document.removeEventListener('click', h); }
   }), 0);
 }
-function exportHistory() {
+const b64encode = s => btoa(unescape(encodeURIComponent(s)));   // UTF-8 안전 (한글 포함)
+const b64decode = s => decodeURIComponent(escape(atob(s)));
+function importRecords(arr) {                 // 공통 머지 (성공 시 true)
+  if (!Array.isArray(arr)) { toast('가져오기 실패 — 형식이 올바르지 않아요'); return false; }
+  const have = new Set(simHistory.map(r => r.id));
+  const add = arr.filter(r => r && r.id && r.snap && !have.has(r.id));
+  simHistory = [...simHistory, ...add];
+  simHistory.sort((a, b) => b.id - a.id);
+  trimHistory(); afterHistChange();
+  toast(`${add.length}개 기록을 가져왔어요 (중복 제외)`);
+  return true;
+}
+function openExportPop() {
   const ids = selectedHistIds();
-  const out = ids.size ? simHistory.filter(r => ids.has(r.id)) : simHistory;   // 선택 있으면 선택분만, 없으면 전체
-  if (!out.length) return toast('내보낼 기록이 없어요');
-  const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `woofia_records_${new Date().toISOString().slice(0, 10)}.json`;
-  a.click(); URL.revokeObjectURL(a.href);
-  toast(`기록 ${out.length}개를 파일로 내보냈어요${ids.size ? ' (선택분)' : ''}`);
+  const out = simHistory.filter(r => ids.has(r.id));     // 선택분만
+  if (!out.length) return toast('내보낼 기록을 먼저 선택하세요');
+  const code = b64encode(JSON.stringify(out));
+  document.querySelector('.iopop')?.remove();
+  const pop = document.createElement('div'); pop.className = 'iopop';
+  pop.innerHTML = `<div class="io-card"><button class="mc-close" data-ioclose>×</button>
+    <div class="pp-head"><h3>내보내기 <em>(${out.length}개 선택)</em></h3></div>
+    <button class="io-big" id="ioFile">📁 파일로 저장</button>
+    <div class="io-or">또는 코드로 공유</div>
+    <textarea class="io-code" id="ioCode" readonly>${code}</textarea>
+    <button class="io-big" id="ioCopy">📋 코드 복사</button></div>`;
+  document.body.appendChild(pop);
+  $('#ioFile').onclick = () => {
+    const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `woofia_records_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); URL.revokeObjectURL(a.href); pop.remove();
+    toast(`기록 ${out.length}개를 파일로 내보냈어요`);
+  };
+  $('#ioCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(code); } catch { $('#ioCode').select(); document.execCommand('copy'); }
+    toast('코드를 복사했어요 — 상대가 가져오기에 붙여넣으면 돼요');
+  };
+  pop.onclick = e => { if (e.target.dataset.ioclose !== undefined || e.target === pop) pop.remove(); };
+}
+function openImportPop() {
+  document.querySelector('.iopop')?.remove();
+  const pop = document.createElement('div'); pop.className = 'iopop';
+  pop.innerHTML = `<div class="io-card"><button class="mc-close" data-ioclose>×</button>
+    <div class="pp-head"><h3>가져오기</h3></div>
+    <button class="io-big" id="ioPickFile">📁 파일 선택</button>
+    <div class="io-or">또는 코드 붙여넣기</div>
+    <textarea class="io-code" id="ioPaste" placeholder="공유받은 코드를 여기에 붙여넣으세요"></textarea>
+    <button class="io-big" id="ioPasteBtn">코드로 가져오기</button></div>`;
+  document.body.appendChild(pop);
+  $('#ioPickFile').onclick = () => $('#hImportFile').click();
+  $('#ioPasteBtn').onclick = () => {
+    const v = $('#ioPaste').value.trim(); if (!v) return toast('코드를 붙여넣어 주세요');
+    let arr;
+    try { arr = JSON.parse(b64decode(v)); } catch { try { arr = JSON.parse(v); } catch { return toast('가져오기 실패 — 올바른 코드가 아니에요'); } }
+    if (importRecords(arr)) pop.remove();
+  };
+  pop.onclick = e => { if (e.target.dataset.ioclose !== undefined || e.target === pop) pop.remove(); };
 }
 function importHistory(e) {
   const f = e.target.files[0]; if (!f) return;
   const reader = new FileReader();
   reader.onload = () => {
-    try {
-      const arr = JSON.parse(reader.result);
-      if (!Array.isArray(arr)) throw 0;
-      const have = new Set(simHistory.map(r => r.id));
-      const add = arr.filter(r => r && r.id && r.snap && !have.has(r.id));
-      simHistory = [...simHistory, ...add];
-      simHistory.sort((a, b) => b.id - a.id);
-      trimHistory(); afterHistChange();
-      toast(`${add.length}개 기록을 가져왔어요 (중복 제외)`);
-    } catch { toast('가져오기 실패 — 올바른 기록 파일이 아니에요'); }
-    e.target.value = '';
+    let arr;
+    try { arr = JSON.parse(reader.result); }
+    catch { try { arr = JSON.parse(b64decode(reader.result.trim())); } catch { toast('가져오기 실패 — 올바른 기록 파일이 아니에요'); e.target.value = ''; return; } }
+    importRecords(arr); document.querySelector('.iopop')?.remove(); e.target.value = '';
   };
   reader.readAsText(f);
 }
@@ -250,6 +291,509 @@ function importHistory(e) {
 })();
 
 // ── boot ──
+// ───────────── 조합 비교 ─────────────
+let cmpData = { a: null, b: null };
+let cmpPairs = [];                       // [{a:charObj|null, b:charObj|null}] 매칭 행
+// 공통 전투 설정 — 두 비교군에 함께 적용해 재계산 (기본: 꺼짐·꺼짐·무속성·1·전체)
+let cmpCommon = { forceProc: false, hp10: false, dummyElement: 0, dummies: 1, enemyHits: 'all', turns: 30 };
+let cmpTurnsManual = false;              // 사용자가 턴 슬라이더를 직접 건드렸는지 (true면 자동설정 안 함)
+let cmpTeam = { a: null, b: null };      // 편집 가능한 팀 cfg (snap.team 복사본)
+let cmpLoaded = { a: null, b: null };    // 현재 로드된 기록 id
+let cmpDmg = { a: {}, b: {} };           // 마지막 시뮬 캐릭별 데미지 (id→dmg)
+let cmpPending = false;                  // 편집 후 재계산 대기 상태
+let cmpTurnOv = { a: {}, b: {} };        // 비교군별 턴 오버라이드 {turn:[position,...]}
+function cmpSideRec(side) {              // 드롭다운 값 → 저장기록 또는 빈(커스텀) 그룹
+  const val = $('#cmp' + (side === 'a' ? 'A' : 'B')).value;
+  if (!val) return { id: '__' + side, snap: { team: [], turns: 30, runs: 50, turnOverrides: {} } };
+  return simHistory.find(r => r.id == val) || null;
+}
+function loadCmpTeam(side, rec) {        // 기록이 바뀔 때만 snap에서 새로 복사(편집 보존)
+  if (cmpLoaded[side] === rec.id) return;
+  cmpTeam[side] = (rec.snap.team || []).map(t => t ? JSON.parse(JSON.stringify(t)) : null);
+  cmpTurnOv[side] = JSON.parse(JSON.stringify(rec.snap.turnOverrides || {}));
+  cmpLoaded[side] = rec.id;
+}
+function sideOrder(side) {               // 비교군 캐릭을 우선순위로 정렬 ({s,i,p})
+  return (cmpTeam[side] || []).map((s, i) => s ? { s, i } : null).filter(Boolean)
+    .map(o => ({ ...o, p: o.s.priority ?? basePriority(o.s, o.i + 1) }))
+    .sort((a, b) => a.p - b.p);
+}
+function cfgFromTeam(side, snap) {        // 편집된 팀 + 공통설정으로 API cfg
+  const picked = (cmpTeam[side] || []).map((t, i) => t ? { ...t, position: i + 1 } : null).filter(Boolean);
+  return {
+    team: picked.map(t => ({ id: t.id, position: t.position, skill: t.skill, rune: t.rune,
+      rotation: t.usePlan ? ((t.plan && t.plan.length) ? t.plan.join('') : (t.rotation || null)) : null,
+      priority: t.priority, sealAtk: t.sealOn ? (t.sealAtk ?? 0) : 0, sealHp: t.sealOn ? (t.sealHp ?? 0) : 0 })),
+    turns: +snap.turns, turnOrders: cmpTurnOv[side] || {},
+    dummies: cmpCommon.dummies, enemyHits: cmpCommon.enemyHits, dummyElement: cmpCommon.dummyElement,
+    forceProc: cmpCommon.forceProc, hp10: cmpCommon.hp10, runs: cmpCommon.forceProc ? 1 : +(snap.runs || 50),
+  };
+}
+function markCmpDirty() { cmpPending = true; $('#cmpRun')?.classList.add('dirty'); if (cmpData && cmpData.a) renderCmpLane(); }
+function cmpRelayout() { cmpPairs = autoMatch(cmpChars('a'), cmpChars('b')); markCmpDirty(); }
+function syncCommon() {
+  cmpCommon = {
+    forceProc: $('#cmpForce').classList.contains('on'), hp10: $('#cmpHp10').classList.contains('on'),
+    dummyElement: +$('#cmpEl').dataset.val, dummies: +$('#cmpDummies').dataset.val, enemyHits: $('#cmpHits').dataset.val,
+    turns: +($('#cmpTurns')?.value || 13),
+  };
+}
+function cmpChars(side) {                 // cmpTeam 로스터 기반; damage=마지막 시뮬값(미계산이면 null)
+  const dmg = cmpDmg[side] || {};
+  return (cmpTeam[side] || []).map((t, i) => t ? {
+    id: t.id, name: (CHARS[t.id] || {}).name || String(t.id), elementKey: (CHARS[t.id] || {}).elementKey,
+    position: i + 1, damage: (t.id in dmg) ? dmg[t.id] : null, cfg: t, slotIdx: i, side
+  } : null).filter(Boolean);
+}
+function autoMatch(A, B) {                // 같은 캐릭 1:1 → 남은 건 포지션 순 → 단독
+  const rows = [], usedB = new Set();
+  for (const ca of A) {
+    const j = B.findIndex((cb, k) => !usedB.has(k) && cb.id === ca.id);
+    if (j >= 0) { rows.push({ a: ca, b: B[j] }); usedB.add(j); } else rows.push({ a: ca, b: null });
+  }
+  for (const cb of B.filter((_, k) => !usedB.has(k)).sort((x, y) => x.position - y.position)) {
+    const row = rows.find(r => !r.b); if (row) row.b = cb; else rows.push({ a: null, b: cb });
+  }
+  return rows;
+}
+// 방향성 비교: A·B 중 높은 쪽으로 화살표 + 더 높은 % / 딜 (A=파랑, B=골드)
+function midHtml(da, db) {
+  if (da == null || db == null) return `<div class="cmp-mid pend">↻</div>`;   // 재계산 대기
+  if (!da || !db) return `<div class="cmp-mid solo">—</div>`;   // 한쪽이 무딜이면 비교 안 함
+  if (da === db) return `<div class="cmp-mid eq"><b>=</b></div>`;
+  const aWin = da > db, pct = Math.round((Math.max(da, db) / Math.max(Math.min(da, db), 1) - 1) * 100);
+  return `<div class="cmp-mid ${aWin ? 'win-a' : 'win-b'}">
+    <b>${aWin ? '◀ ' : ''}+${pct}%${aWin ? '' : ' ▶'}</b><span>+${fmtShort(Math.abs(da - db))}</span></div>`;
+}
+function cmpCell(c, side) {
+  if (!c) return `<div class="cmp-cell empty" data-side="${side}" data-add>＋ 추가</div>`;
+  const d = c.damage == null ? `<span class="cc-d pend">?</span>` : `<span class="cc-d">${fmtShort(c.damage)}</span>`;
+  return `<div class="cmp-cell el-${c.elementKey}" data-side="${side}" draggable="true" title="눌러서 도장·행동·교체">
+    <img src="${icon(c.id)}" alt=""><span class="cc-n">${esc(c.name)}</span>${d}</div>`;
+}
+function renderCmpLane() {
+  const mvBtns = (sd, i) => `<div class="cc-mv"><button data-mv="up" data-mvside="${sd}" data-row="${i}">▲</button><button data-mv="down" data-mvside="${sd}" data-row="${i}">▼</button></div>`;
+  const rows = cmpPairs.map((r, i) => {
+    const mid = cmpPending ? `<div class="cmp-mid pend">↻</div>`
+      : ((r.a && r.b) ? midHtml(r.a.damage, r.b.damage) : `<div class="cmp-mid solo">단독</div>`);
+    return `<div class="cmp-row" data-row="${i}">
+      <div class="cmp-awrap">${mvBtns('a', i)}${cmpCell(r.a, 'a')}</div>${mid}
+      <div class="cmp-bwrap">${cmpCell(r.b, 'b')}${mvBtns('b', i)}</div></div>`;
+  }).join('');
+  const aN = (cmpTeam.a || []).filter(Boolean).length, bN = (cmpTeam.b || []).filter(Boolean).length;
+  // 이미 단독 행에 빈칸(＋추가)이 있는 쪽엔 추가행을 또 붙이지 않음 (6번째 슬롯 방지)
+  const aHasEmpty = cmpPairs.some(r => !r.a), bHasEmpty = cmpPairs.some(r => !r.b);
+  const aAdd = aN < 5 && !aHasEmpty, bAdd = bN < 5 && !bHasEmpty;
+  const addRow = (aAdd || bAdd)
+    ? `<div class="cmp-row">${aAdd ? `<div class="cmp-awrap">${cmpCell(null, 'a')}</div>` : '<div></div>'}<div class="cmp-mid"></div>${bAdd ? `<div class="cmp-bwrap">${cmpCell(null, 'b')}</div>` : '<div></div>'}</div>`
+    : '';
+  let total;
+  if (cmpPending) total = `<div class="cmp-pending">변경됨 — <b>비교하기</b>를 눌러 결과를 갱신하세요</div>`;
+  else if (aN || bN) {
+    const ta = cmpData.a.meta, tb = cmpData.b.meta, tA = ta.totalMid ?? ta.total, tB = tb.totalMid ?? tb.total;
+    total = `<div class="cmp-total"><div class="ct-side a">${fmt(tA)}</div>${midHtml(tA, tB)}<div class="ct-side b">${fmt(tB)}</div></div>`;
+  } else total = '';
+  const prioRow = (aN || bN) ? `<div class="cmp-priorow">
+    <span>${aN ? `<button class="ct-prio" data-prio="a">⇅ 행동 우선순위</button>` : ''}</span>
+    <span>${bN ? `<button class="ct-prio" data-prio="b">⇅ 행동 우선순위</button>` : ''}</span></div>` : '';
+  $('#cmpBody').innerHTML = `<div class="cmp-colhead"><span class="ch-a">A</span><span>높은 쪽 ◀▶ · ${cmpCommon.turns || ''}턴</span><span class="ch-b">B</span></div>
+    <div class="cmp-lane">${rows}${addRow}</div>${total}${prioRow}
+    <div class="cmp-chart" id="cmpChart"></div>`;
+  if (!cmpPending) renderCmpChart();
+}
+function openCmpInfo(c) {
+  if (!c) return;
+  const cf = c.cfg || {}, ch = CHARS[c.id] || {};
+  const ua = cf.sealOn ? (cf.sealAtk || 0) : 0, uh = cf.sealOn ? (cf.sealHp || 0) : 0;
+  const isManual = !!(cf.usePlan && cf.plan && cf.plan.length);
+  let pop = document.querySelector('.cmpinfo'); pop?.remove();
+  pop = document.createElement('div'); pop.className = 'cmpinfo';
+  pop.innerHTML = `<div class="ci-card el-${c.elementKey}" style="--el:var(--${c.elementKey})">
+    <div class="ci-head">
+      <div class="ci-top"><img src="${icon(c.id)}" alt=""><div><h3>${esc(c.name)}</h3>
+        <div class="ci-tags"><span class="tag el">${ch.element || ''}속성</span><span class="tag">${ch.role || ''}</span><span class="tag">P${cf.position || c.position}</span></div></div></div>
+      <div class="ci-hbtns"><button class="ci-swap" data-swap>⇄ 교체</button><button class="mc-close" data-ciclose>×</button></div>
+    </div>
+    <div class="ci-rows">
+      <div class="ci-r tap" data-seal><span>도장 강화</span><b class="ci-state ${cf.sealOn ? 'on' : ''}" id="ciSeal">${cf.sealOn ? 'ON' : 'OFF'} ▸</b></div>
+      <div class="ci-r"><span>기본 공격력</span><b id="ciAtk">${fmt((ch.atk || 0) + ua)}${ua ? `<em>(+${fmt(ua)})</em>` : ''}</b></div>
+      <div class="ci-r"><span>최대 체력</span><b id="ciHp">${fmt((ch.hp || 0) + uh)}${uh ? `<em>(+${fmt(uh)})</em>` : ''}</b></div>
+      <div class="ci-r tap" data-plan><span>행동</span><b class="ci-state">${isManual ? '수동' : '자동'} ▸</b></div>
+    </div></div>`;
+  document.body.appendChild(pop);
+  pop.onclick = e => {
+    if (e.target.closest('[data-swap]')) { openSwapPop(c); return; }
+    if (e.target.closest('[data-seal]')) { openSealPop(c); return; }
+    if (e.target.closest('[data-plan]')) { openPlanPopup(c); return; }
+    if (e.target.dataset.ciclose !== undefined || e.target === pop) pop.remove();
+  };
+}
+function updateCiStats(c) {                // 도장 변경 시 정보카드 ATK/HP/도장상태 즉시 반영
+  const cf = c.cfg || {}, ch = CHARS[c.id] || {};
+  const ua = cf.sealOn ? (cf.sealAtk || 0) : 0, uh = cf.sealOn ? (cf.sealHp || 0) : 0;
+  const s = $('#ciSeal'); if (s) { s.textContent = (cf.sealOn ? 'ON' : 'OFF') + ' ▸'; s.classList.toggle('on', !!cf.sealOn); }
+  const a = $('#ciAtk'); if (a) a.innerHTML = `${fmt((ch.atk || 0) + ua)}${ua ? `<em>(+${fmt(ua)})</em>` : ''}`;
+  const h = $('#ciHp'); if (h) h.innerHTML = `${fmt((ch.hp || 0) + uh)}${uh ? `<em>(+${fmt(uh)})</em>` : ''}`;
+}
+function openSealPop(c) {
+  const meta = CHARS[c.id] || {}, limit = meta.sealLimit || 20000, cf = c.cfg;
+  if (cf.sealAtk == null) { cf.sealAtk = 0; cf.sealHp = limit; }
+  document.querySelector('.sealpop')?.remove();
+  const pop = document.createElement('div'); pop.className = 'sealpop';
+  pop.innerHTML = `<div class="sp-card"><button class="mc-close" data-spclose>×</button>
+    <div class="pp-head"><img src="${icon(c.id)}" alt=""><h3>${esc(c.name)} · 도장 강화</h3></div>
+    <label class="toggle pp-toggle"><input type="checkbox" id="spOn"><span class="sw"></span>도장 강화 <em>한계 ${fmt(limit)} (공격력+체력)</em></label>
+    <div class="sp-body" id="spBody">
+      <div class="seal-row"><span class="sl-lbl atk">공격력</span>
+        <input type="range" id="spAtkR" min="0" max="${limit}" step="100"><input type="number" id="spAtkN" min="0" max="${limit}" step="100"></div>
+      <div class="seal-row"><span class="sl-lbl hp">체력</span>
+        <input type="range" id="spHpR" min="0" max="${limit}" step="100"><input type="number" id="spHpN" min="0" max="${limit}" step="100"></div>
+      <div class="seal-ratio" id="spRatio"></div>
+    </div></div>`;
+  document.body.appendChild(pop);
+  const sync = atk => {
+    atk = Math.max(0, Math.min(limit, Math.round((atk || 0) / 100) * 100));
+    cf.sealAtk = atk; cf.sealHp = limit - atk;
+    $('#spAtkR').value = atk; $('#spAtkN').value = atk; $('#spHpR').value = cf.sealHp; $('#spHpN').value = cf.sealHp;
+    $('#spAtkR').style.setProperty('--p', (atk / limit * 100) + '%'); $('#spHpR').style.setProperty('--p', (cf.sealHp / limit * 100) + '%');
+    const ap = Math.round(atk / limit * 100);
+    $('#spRatio').innerHTML = `공격력 <b class="atk">${ap}%</b> : 체력 <b class="hp">${100 - ap}%</b>`;
+    updateCiStats(c); markCmpDirty();
+  };
+  $('#spOn').checked = !!cf.sealOn; $('#spBody').classList.toggle('off', !cf.sealOn);
+  $('#spOn').onchange = () => { cf.sealOn = $('#spOn').checked; $('#spBody').classList.toggle('off', !cf.sealOn); sync(cf.sealAtk); };
+  $('#spAtkR').oninput = e => sync(+e.target.value);
+  $('#spAtkN').onchange = e => sync(+e.target.value);
+  $('#spHpR').oninput = e => sync(limit - +e.target.value);
+  $('#spHpN').onchange = e => sync(limit - +e.target.value);
+  sync(cf.sealAtk);
+  pop.onclick = e => { if (e.target.dataset.spclose !== undefined || e.target === pop) pop.remove(); };
+}
+function openAddPop(side) {
+  if (!cmpTeam[side]) return;
+  document.querySelector('.swappop')?.remove();
+  const inGroup = new Set(cmpTeam[side].filter(Boolean).map(t => t.id));
+  const list = Object.values(CHARS).sort((x, y) => (x.name || '').localeCompare(y.name || '', 'ko'));
+  const grid = list.map(ch => `<button class="sw-ic el-${ch.elementKey}" data-id="${ch.id}"${inGroup.has(ch.id) ? ' disabled' : ''}>
+    <img src="${icon(ch.id)}" alt=""><span>${esc(ch.name)}</span></button>`).join('');
+  const pop = document.createElement('div'); pop.className = 'swappop';
+  pop.innerHTML = `<div class="sw-card"><button class="mc-close" data-swclose>×</button>
+    <div class="pp-head"><h3>캐릭터 추가 <em>(비교군 ${side === 'a' ? 'A' : 'B'})</em></h3></div>
+    <div class="sw-grid">${grid}</div></div>`;
+  document.body.appendChild(pop);
+  pop.onclick = e => {
+    const b = e.target.closest('.sw-ic');
+    if (b && !b.disabled) {
+      let idx = cmpTeam[side].findIndex(t => !t);     // 빈 슬롯 우선, 없으면 추가(최대 5)
+      if (idx < 0) { if (cmpTeam[side].filter(Boolean).length >= 5) return toast('비교군이 가득 찼어요 (최대 5)'); idx = cmpTeam[side].length; }
+      cmpTeam[side][idx] = { id: +b.dataset.id, skill: 10, rune: true, rotation: '' };
+      pop.remove(); cmpRelayout(); return;
+    }
+    if (e.target.dataset.swclose !== undefined || e.target === pop) pop.remove();
+  };
+}
+function openSwapPop(c) {
+  document.querySelector('.swappop')?.remove();
+  const inGroup = new Set((cmpTeam[c.side] || []).filter(Boolean).map(t => t.id));
+  const list = Object.values(CHARS).sort((x, y) => (x.name || '').localeCompare(y.name || '', 'ko'));
+  const grid = list.map(ch => {
+    const dis = inGroup.has(ch.id) && ch.id !== c.id;
+    return `<button class="sw-ic el-${ch.elementKey}${ch.id === c.id ? ' cur' : ''}" data-id="${ch.id}"${dis ? ' disabled' : ''}>
+      <img src="${icon(ch.id)}" alt=""><span>${esc(ch.name)}</span></button>`;
+  }).join('');
+  const pop = document.createElement('div'); pop.className = 'swappop';
+  pop.innerHTML = `<div class="sw-card"><button class="mc-close" data-swclose>×</button>
+    <div class="pp-head"><h3>캐릭터 교체 <em>(비교군 ${c.side === 'a' ? 'A' : 'B'})</em></h3></div>
+    <div class="sw-grid"><button class="sw-ic sw-none" data-id="none"><span class="sw-x">✕</span><span>제외</span></button>${grid}</div></div>`;
+  document.body.appendChild(pop);
+  pop.onclick = e => {
+    const b = e.target.closest('.sw-ic');
+    if (b && !b.disabled) {
+      const idx = c.slotIdx;
+      if (idx >= 0 && cmpTeam[c.side]) {
+        if (b.dataset.id === 'none') {            // 로스터에서 제외(빈 슬롯)
+          cmpTeam[c.side][idx] = null; pop.remove();
+          document.querySelector('.cmpinfo')?.remove(); cmpRelayout(); return;
+        }
+        const newId = +b.dataset.id;
+        if (newId !== c.id) {
+          cmpTeam[c.side][idx] = { id: newId, skill: 10, rune: true, rotation: '' };
+          pop.remove(); cmpRelayout();
+          openCmpInfo({ id: newId, name: (CHARS[newId] || {}).name || String(newId), elementKey: (CHARS[newId] || {}).elementKey, position: c.position, damage: null, cfg: cmpTeam[c.side][idx], slotIdx: idx, side: c.side });
+          return;
+        }
+      }
+    }
+    if (e.target.dataset.swclose !== undefined || e.target === pop) pop.remove();
+  };
+}
+function openPlanPopup(c) {
+  document.querySelector('.planpop')?.remove();
+  const pop = document.createElement('div'); pop.className = 'planpop';
+  pop.innerHTML = `<div class="pp-card"><button class="mc-close" data-ppclose>×</button>
+    <div class="pp-head"><img src="${icon(c.id)}" alt=""><h3>${esc(c.name)} · 행동</h3></div>
+    <label class="toggle pp-toggle"><input type="checkbox" id="ppOn"><span class="sw"></span>행동 직접 지정 <em>(끄면 자동)</em></label>
+    <div class="pp-legend"><span class="ro-a a평">평</span>평타<span class="ro-a a궁">궁</span>필살<span class="ro-a a방">방</span>방어</div>
+    <div class="plan-legend" id="ppRules"></div>
+    <div id="ppGrid"></div></div>`;
+  document.body.appendChild(pop);
+  $('#ppOn').checked = !!c.cfg.usePlan;
+  $('#ppOn').onchange = () => {
+    c.cfg.usePlan = $('#ppOn').checked;
+    if (c.cfg.usePlan && !(c.cfg.plan && c.cfg.plan.length)) c.cfg.plan = defaultPlan(CHARS[c.id] || {}, cmpCommon.turns || 30);
+    markCmpDirty(); renderPlanPop(c);
+  };
+  renderPlanPop(c);
+  pop.onclick = e => { if (e.target.dataset.ppclose !== undefined || e.target === pop) pop.remove(); };
+}
+function renderPlanPop(c) {                 // 본 플래너와 동일: CD 게이팅·방어 CD감소·궁 재배치 적용
+  const grid = $('#ppGrid'); if (!grid) return;
+  const meta = CHARS[c.id] || {}, apt = meta.actionsPerTurn || 1, on = !!c.cfg.usePlan, turns = cmpCommon.turns || 30;
+  let plan = (c.cfg.plan && c.cfg.plan.length) ? c.cfg.plan : (c.cfg.plan = defaultPlan(meta, turns));
+  while (plan.length < turns * apt) plan.push('평');
+  if (apt === 1) normalizePlan(plan, meta);          // CD 검증·게이팅 (단일행동 캐릭)
+  const ok = apt === 1 ? ultAvail(plan, meta) : null;
+  let html = '';
+  for (let ti = 0; ti < turns; ti++) {
+    let cells = '';
+    for (let a = 0; a < apt; a++) {
+      const idx = ti * apt + a, act = plan[idx];
+      const btn = (k, l) => {
+        const lockUlt = apt === 1 && k === '궁' && !ok[ti] && !(meta.cdDefendReduce > 0);   // CD 안 찬 턴 궁 잠금
+        return `<button class="a${k}${act === k ? ' on' : ''}" data-idx="${idx}" data-a="${k}"${(!on || lockUlt) ? ' disabled' : ''}>${l}</button>`;
+      };
+      cells += `<div class="pp-acts">${btn('평', '평')}${btn('궁', '궁')}${btn('방', '방')}</div>`;
+    }
+    html += `<div class="pp-cell${apt > 1 ? ' dbl' : ''}"><div class="pp-t">${ti + 1}</div>${cells}</div>`;
+  }
+  const rules = $('#ppRules');
+  if (rules) {
+    const ruleTxt = apt > 1
+      ? `매 턴 <b style="color:var(--gold)">${apt}회 행동</b> · 궁은 턴당 1회 (궁궁 불가) · 임부언 추가행동은 평타`
+      : `필살 CD <b style="color:var(--gold)">${meta.fatalCd}턴</b> · 첫 사용 <b style="color:var(--gold)">${meta.firstFatal}턴</b> · 궁은 CD 안 찬 턴 비활성`;
+    rules.innerHTML = `<span>${ruleTxt}</span><span class="plan-fill">
+      <button data-fill="평"${on ? '' : ' disabled'}>모두 평타</button><button data-fill="방"${on ? '' : ' disabled'}>모두 방어</button></span>`;
+    rules.querySelectorAll('[data-fill]').forEach(b => b.onclick = () => {
+      c.cfg.plan = fillPlan(meta, b.dataset.fill, turns);     // apt 인식: 단일행동은 궁 cadence 유지, 이태호는 순수 채움
+      c.cfg.rotation = c.cfg.plan.join(''); markCmpDirty(); renderPlanPop(c);
+    });
+  }
+  grid.className = 'pp-grid' + (on ? '' : ' off');
+  grid.innerHTML = html;
+  grid.onclick = on ? (e => {
+    const btn = e.target.closest('button[data-a]'); if (!btn || btn.disabled) return;
+    const idx = +btn.dataset.idx, a = btn.dataset.a;
+    plan[idx] = a;
+    if (apt > 1 && a === '궁') {                      // 궁은 턴당 1회 — 같은 턴 다른 슬롯의 궁 제거
+      const ti0 = Math.floor(idx / apt);
+      for (let a2 = 0; a2 < apt; a2++) { const j = ti0 * apt + a2; if (j !== idx && plan[j] === '궁') plan[j] = '평'; }
+    }
+    if (a === '궁' && meta.cdDefendReduce > 0) {      // 모이루·히토하: 앞턴 방어+입질 평타 자동 배치
+      enforceCdDefend(plan, meta, idx + 1);
+      toast(`${meta.name}: 필살 CD 감소를 위해 바로 앞 턴을 <b>방어</b>로, 그 앞에 입질용 <b>평타</b>를 자동 배치했어요`);
+    } else if (apt === 1 && a === '궁') reflowUlts(plan, meta, idx + 1);   // 단일행동: 궁 자동 재배치
+    if (apt === 1) normalizePlan(plan, meta);
+    c.cfg.plan = plan; c.cfg.rotation = plan.join('');
+    markCmpDirty(); renderPlanPop(c);
+  }) : null;
+}
+function openPrioPop(side) {                // 비교군별 행동 우선순위 + 특정 턴 오버라이드
+  document.querySelector('.priopop')?.remove();
+  const pop = document.createElement('div'); pop.className = 'priopop';
+  pop.innerHTML = `<div class="pr-card"><button class="mc-close" data-prclose>×</button>
+    <div class="pp-head"><h3>행동 우선순위 <em>(비교군 ${side === 'a' ? 'A' : 'B'})</em></h3></div>
+    <div class="pr-sub">행동 순서 <em>(드래그·▲▼)</em></div>
+    <ol class="prio" id="prPrio"></ol>
+    <div class="pr-sub">특정 턴만 다르게 <em>(턴 선택 후 순서 변경)</em></div>
+    <div class="turn-chips" id="prChips"></div>
+    <div id="prEditor"></div>
+    <button class="btn-ghost sm" id="prReset" style="margin-top:10px">전부 기본값으로</button></div>`;
+  document.body.appendChild(pop);
+  const selT = autoSelOverrides(cmpTurnOv[side] || {}), turns = cmpCommon.turns || 30, order = () => sideOrder(side);
+  function renderList() {
+    const ord = order();
+    $('#prPrio').innerHTML = ord.map((o, k) => { const c = CHARS[o.s.id] || {};
+      return `<li class="${o.s.priority != null ? 'cust' : ''}" draggable="true"><span class="ord">${k + 1}</span>
+        <img class="pic el-${c.elementKey}" src="${icon(o.s.id)}" alt="" draggable="false">
+        <span class="nm">${c.name || o.s.id}</span>${mvArrows(k, ord.length)}</li>`; }).join('');
+    const apply = arr => { arr.forEach((o, k) => o.s.priority = k + 1); markCmpDirty(); renderList(); };
+    makeDraggable($('#prPrio'), (from, to) => { const arr = order(); const [m] = arr.splice(from, 1); arr.splice(to, 0, m); apply(arr); });
+    $('#prPrio').onclick = e => { const b = e.target.closest('.mv'); if (!b) return;
+      const arr = order(), k = +b.dataset.k, to = b.dataset.mv === 'up' ? k - 1 : k + 1; if (to < 0 || to >= arr.length) return;
+      const [m] = arr.splice(k, 1); arr.splice(to, 0, m); apply(arr); };
+    renderChips();
+  }
+  function renderChips() {
+    for (const t of [...selT]) if (t > turns) selT.delete(t);
+    const ov = cmpTurnOv[side] || (cmpTurnOv[side] = {});
+    $('#prChips').innerHTML = Array.from({ length: turns }, (_, i) => { const t = i + 1;
+      return `<button class="${ov[t] ? 'has' : ''} ${selT.has(t) ? 'sel' : ''}" data-t="${t}">${t}</button>`; }).join('');
+    $('#prChips').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+      const t = +b.dataset.t; selT.has(t) ? selT.delete(t) : selT.add(t); renderChips(); };
+    renderEditor();
+  }
+  function renderEditor() {
+    const ed = $('#prEditor'); if (!selT.size) { ed.innerHTML = ''; return; }
+    const ov = cmpTurnOv[side] || (cmpTurnOv[side] = {});
+    const sel = [...selT].sort((a, b) => a - b), first = sel[0];
+    const baseOrd = order().map(o => o.i + 1);
+    let ord = (ov[first] ? [...ov[first]] : [...baseOrd]).filter(p => (cmpTeam[side] || [])[p - 1]);
+    const anyHas = sel.some(t => ov[t]);
+    const label = sel.length === 1 ? `${first}턴` : `${sel.length}개 턴 (${sel.join('·')})`;
+    ed.innerHTML = `<div class="te-head"><b>${label}</b> 행동 순서 — ${anyHas ? '변경됨' : '기본 따름'}${sel.length > 1 ? ' <em>같은 순서로 일괄 적용</em>' : ''}</div>
+      <ol class="prio">${ord.map((p, k) => { const c = CHARS[cmpTeam[side][p - 1].id] || {};
+        return `<li draggable="true"><span class="ord">${k + 1}</span><img class="pic el-${c.elementKey}" src="${icon(cmpTeam[side][p - 1].id)}" alt="" draggable="false">
+          <span class="nm">${c.name || ''}</span>${mvArrows(k, ord.length)}</li>`; }).join('')}</ol>
+      ${anyHas ? '<button class="btn-ghost sm" id="prClearTurn">선택 턴 기본값으로</button>' : ''}`;
+    const applyTurn = () => { sel.forEach(t => ov[t] = [...ord]); markCmpDirty(); renderChips(); };
+    makeDraggable(ed.querySelector('.prio'), (from, to) => { const [m] = ord.splice(from, 1); ord.splice(to, 0, m); applyTurn(); });
+    ed.querySelector('.prio').onclick = e => { const b = e.target.closest('.mv'); if (!b) return;
+      const k = +b.dataset.k, to = b.dataset.mv === 'up' ? k - 1 : k + 1; if (to < 0 || to >= ord.length) return;
+      const [m] = ord.splice(k, 1); ord.splice(to, 0, m); applyTurn(); };
+    const ct = $('#prClearTurn'); if (ct) ct.onclick = () => { sel.forEach(t => delete ov[t]); markCmpDirty(); renderChips(); };
+  }
+  $('#prReset').onclick = () => { (cmpTeam[side] || []).forEach(s => { if (s) delete s.priority; }); cmpTurnOv[side] = {}; selT.clear(); markCmpDirty(); renderList(); };
+  renderList();
+  pop.onclick = e => { if (e.target.dataset.prclose !== undefined || e.target === pop) pop.remove(); };
+}
+let cmpChart = null;                       // {ca, cb, n, mx} — 호버 조회용
+function renderCmpChart() {
+  const A = cmpData.a.chart || [], B = cmpData.b.chart || [];
+  const n = Math.min(A.length, B.length); if (!n) { cmpChart = null; return; }   // 작은 쪽 턴까지만
+  const cum = arr => { let s = 0; return arr.slice(0, n).map(t => (s += (t.total || 0))); };
+  const ca = cum(A), cb = cum(B), mx = Math.max(...ca, ...cb, 1);
+  cmpChart = { ca, cb, n, mx };
+  const xp = i => i / Math.max(n - 1, 1) * 100;
+  const pts = a => a.map((v, i) => `${xp(i).toFixed(1)},${(100 - v / mx * 100).toFixed(1)}`).join(' ');
+  // 가로 그리드 (25/50/75%) + x축 턴 라벨
+  const grid = [25, 50, 75].map(p => `<div class="cc-grid" style="top:${p}%"></div>`).join('');
+  const step = Math.max(1, Math.ceil(n / 8)); let ticks = '';
+  for (let i = 0; i < n; i += step) ticks += `<span style="left:${xp(i)}%;transform:translateX(${i === 0 ? '0' : '-50%'})">${i + 1}</span>`;
+  ticks += `<span style="left:100%;transform:translateX(-100%)">${n}</span>`;
+  $('#cmpChart').innerHTML = `<div class="cc-title">턴별 누적 딜 <em>(${n}턴 기준)</em></div>
+    <div class="cc-plot" id="ccPlot">${grid}
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline class="ln-a" points="${pts(ca)}"/><polyline class="ln-b" points="${pts(cb)}"/></svg>
+      <div class="cc-cursor" hidden></div><div class="cc-dot a" hidden></div><div class="cc-dot b" hidden></div>
+      <div class="cc-tip" hidden></div></div>
+    <div class="cc-axis">${ticks}</div>
+    <div class="cc-leg"><span class="lg a">A 총 ${fmtShort(ca[n-1])}</span><span class="lg b">B 총 ${fmtShort(cb[n-1])}</span><span class="cc-hh">막대 위에 마우스를 올려 턴별 차이 보기</span></div>`;
+}
+function cmpCursor(plot, i) {
+  const { ca, cb, n, mx } = cmpChart;
+  const xpc = i / Math.max(n - 1, 1) * 100, a = ca[i], b = cb[i];
+  const cur = plot.querySelector('.cc-cursor'), tip = plot.querySelector('.cc-tip');
+  const dA = plot.querySelector('.cc-dot.a'), dB = plot.querySelector('.cc-dot.b');
+  cur.style.left = xpc + '%'; cur.hidden = false;
+  dA.style.left = xpc + '%'; dA.style.top = (100 - a / mx * 100) + '%'; dA.hidden = false;
+  dB.style.left = xpc + '%'; dB.style.top = (100 - b / mx * 100) + '%'; dB.hidden = false;
+  const aWin = a > b, diff = Math.abs(a - b), pct = Math.min(a, b) ? Math.round((Math.max(a, b) / Math.min(a, b) - 1) * 100) : 0;
+  tip.innerHTML = `<div class="ct-t">${i + 1}턴</div>
+    <div class="ct-l"><span class="d-a">A</span>${fmt(a)}</div><div class="ct-l"><span class="d-b">B</span>${fmt(b)}</div>
+    <div class="ct-d ${a === b ? 'eq' : aWin ? 'win-a' : 'win-b'}">${a === b ? '동일' : `${aWin ? 'A' : 'B'} +${fmtShort(diff)} · +${pct}%`}</div>`;
+  tip.hidden = false;
+  tip.style.left = (xpc > 58 ? xpc - 3 : xpc + 3) + '%';
+  tip.style.transform = xpc > 58 ? 'translateX(-100%)' : '';
+}
+function cmpCursorHide() { document.querySelectorAll('.cc-cursor,.cc-dot,.cc-tip').forEach(el => el.hidden = true); }
+async function runCompare() {
+  const ra = cmpSideRec('a'), rb = cmpSideRec('b');
+  if (!ra || !rb) { $('#cmpBody').innerHTML = `<div class="cmp-hint">비교할 대상을 골라주세요</div>`; return; }
+  if (ra.id === rb.id) { $('#cmpBody').innerHTML = `<div class="cmp-hint">서로 다른 두 기록을 골라주세요</div>`; return; }
+  loadCmpTeam('a', ra); loadCmpTeam('b', rb);
+  $('#cmpRun')?.classList.remove('dirty');
+  $('#cmpBody').innerHTML = `<div class="cmp-hint"><span class="spin"></span> 두 조합 재실행 중…</div>`;
+  try {
+    // 진행 턴 수: 사용자가 안 건드렸으면 두 그룹 최소턴(빈 그룹=30) 자동, 건드렸으면 슬라이더 우선
+    if (!cmpTurnsManual) {
+      const autoT = Math.min(+ra.snap.turns || 30, +rb.snap.turns || 30);
+      cmpCommon.turns = autoT;
+      const ct = $('#cmpTurns'); if (ct) { ct.value = autoT; ct.style.setProperty('--p', (autoT / 30 * 100) + '%'); $('#cmpTurnsVal').textContent = autoT; }
+    }
+    const mt = cmpCommon.turns || 30;
+    const simSide = (side, rec) => {        // 빈 편성이면 시뮬 생략(빈 결과)
+      if (!(cmpTeam[side] || []).some(Boolean)) return Promise.resolve({ meta: { total: 0, totalMid: 0, turns: mt }, perChar: [], chart: [], team: [] });
+      const cfg = cfgFromTeam(side, rec.snap); cfg.turns = mt;
+      return API.simulate(cfg);
+    };
+    const [da, db] = await Promise.all([simSide('a', ra), simSide('b', rb)]);
+    if (da.error || db.error) throw new Error(da.error || db.error);
+    cmpDmg.a = {}; (da.perChar || []).forEach(c => cmpDmg.a[c.id] = c.damage);
+    cmpDmg.b = {}; (db.perChar || []).forEach(c => cmpDmg.b[c.id] = c.damage);
+    cmpData = { a: { ...da, snap: ra.snap }, b: { ...db, snap: rb.snap }, turns: mt };
+    cmpPending = false;
+    cmpPairs = autoMatch(cmpChars('a'), cmpChars('b'));
+    renderCmpLane();
+  } catch (e) { $('#cmpBody').innerHTML = `<div class="cmp-hint">비교 실패 — ${esc(e.message || '오류')}</div>`; }
+}
+function bindCompare() {
+  const opts = () => histView().map(r => `<option value="${r.id}">${(r.pinned ? '📌' : '') + (r.locked ? '🔒' : '')}${esc(r.name || r.label)}</option>`).join('');
+  $('#cmpBtn').onclick = () => {
+    // 매번 빈 편성으로 초기화 — 최상단 "비교군 A/B"(빈 편성) 기본 선택
+    $('#cmpA').innerHTML = `<option value="">＋ 비교군 A (빈 편성)</option>` + opts();
+    $('#cmpB').innerHTML = `<option value="">＋ 비교군 B (빈 편성)</option>` + opts();
+    $('#cmpA').value = ''; $('#cmpB').value = '';
+    cmpLoaded = { a: null, b: null }; cmpTeam = { a: null, b: null }; cmpTurnOv = { a: {}, b: {} };
+    cmpTurnsManual = false;
+    const ct0 = $('#cmpTurns'); if (ct0) { ct0.value = 30; ct0.style.setProperty('--p', '100%'); $('#cmpTurnsVal').textContent = 30; }
+    syncCommon();
+    $('#cmpModal').hidden = false; runCompare();
+  };
+  $('#cmpModal').onclick = e => { if (e.target.dataset.cclose !== undefined) $('#cmpModal').hidden = true; };
+  $('#cmpA').onchange = runCompare; $('#cmpB').onchange = runCompare;
+  // 공통 전투 설정 — 변경은 상태만 갱신, 재계산은 '비교하기' 버튼으로 (매번 재실행 방지)
+  $('#cmpForce').onclick = () => { $('#cmpForce').classList.toggle('on'); syncCommon(); markCmpDirty(); };
+  $('#cmpHp10').onclick = () => { $('#cmpHp10').classList.toggle('on'); syncCommon(); markCmpDirty(); };
+  ['cmpEl', 'cmpDummies', 'cmpHits'].forEach(id => {
+    $('#' + id).onclick = e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const seg = $('#' + id); seg.dataset.val = b.dataset.v;
+      seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      syncCommon(); markCmpDirty();
+    };
+  });
+  const ct = $('#cmpTurns');
+  if (ct) {
+    const ctUpd = () => { $('#cmpTurnsVal').textContent = ct.value; ct.style.setProperty('--p', (ct.value / 30 * 100) + '%'); };
+    ct.oninput = () => { cmpTurnsManual = true; ctUpd(); };
+    ct.onchange = () => { cmpTurnsManual = true; syncCommon(); markCmpDirty(); }; ctUpd();
+  }
+  $('#cmpRun').onclick = () => runCompare();
+  $('#cmpBody').onclick = e => {
+    const prio = e.target.closest('[data-prio]');
+    if (prio) { openPrioPop(prio.dataset.prio); return; }     // 행동 우선순위 팝업
+    const mv = e.target.closest('[data-mv]');
+    if (mv) {
+      const i = +mv.dataset.row, j = mv.dataset.mv === 'up' ? i - 1 : i + 1, sd = mv.dataset.mvside;
+      if (j < 0 || j >= cmpPairs.length) return;
+      [cmpPairs[i][sd], cmpPairs[j][sd]] = [cmpPairs[j][sd], cmpPairs[i][sd]]; renderCmpLane(); return;
+    }
+    const add = e.target.closest('.cmp-cell.empty[data-side]');     // 빈칸 클릭 → 캐릭터 추가
+    if (add) { openAddPop(add.dataset.side); return; }
+    const cell = e.target.closest('.cmp-cell[data-side]'); if (!cell) return;   // 아이콘 클릭 → 도장·행동·교체
+    openCmpInfo(cmpPairs[+cell.closest('.cmp-row').dataset.row][cell.dataset.side]);
+  };
+  $('#cmpBody').addEventListener('mousemove', e => {       // 그래프 호버 → 턴별 차이
+    const plot = e.target.closest('#ccPlot');
+    if (!plot || !cmpChart) { cmpCursorHide(); return; }
+    const rect = plot.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    cmpCursor(plot, Math.round(x * (cmpChart.n - 1)));
+  });
+  $('#cmpBody').addEventListener('mouseleave', cmpCursorHide);
+  let dragRow = null, dragSide = null;
+  $('#cmpBody').addEventListener('dragstart', e => {
+    const c = e.target.closest('.cmp-cell[data-side]');
+    if (c && !c.classList.contains('empty')) { dragSide = c.dataset.side; dragRow = +c.closest('.cmp-row').dataset.row; }
+  });
+  $('#cmpBody').addEventListener('dragover', e => { if (dragRow !== null && e.target.closest('.cmp-row')) e.preventDefault(); });
+  $('#cmpBody').addEventListener('drop', e => {
+    const row = e.target.closest('.cmp-row'); if (dragRow === null || !row) { dragRow = dragSide = null; return; }
+    const j = +row.dataset.row;
+    if (j !== dragRow) { [cmpPairs[dragRow][dragSide], cmpPairs[j][dragSide]] = [cmpPairs[j][dragSide], cmpPairs[dragRow][dragSide]]; renderCmpLane(); }
+    dragRow = dragSide = null;
+  });
+}
+
 (async function init() {
   if (!USE_PY) document.getElementById('boot')?.remove();   // 로컬(fetch)은 즉시 로딩
   const list = await API.chars();
@@ -257,6 +801,7 @@ function importHistory(e) {
   loadHistory();
   bindSettings();
   bindHistory();
+  bindCompare();
   renderHistory(simHistory[0]?.id);
   if (simHistory.length) {                 // 재진입 시 가장 최근 기록으로 복원
     restoreRecord(simHistory[0]);
@@ -319,6 +864,15 @@ function teamOrder() {
 }
 let turnOverrides = {};   // {turn:[position,...]}  per-turn order override
 let selTurns = new Set();  // 다중선택된 턴들 (토글)
+// 진입 시 오버라이드 설정된 턴 자동 선택 — 첫 턴과 같은 순서를 가진 것만 묶어(드래그 덮어쓰기 방지)
+function autoSelOverrides(ov) {
+  const keys = Object.keys(ov || {}).map(Number).sort((a, b) => a - b), set = new Set();
+  if (keys.length) {
+    const first = JSON.stringify(ov[keys[0]]);
+    keys.forEach(t => { if (JSON.stringify(ov[t]) === first) set.add(t); });
+  }
+  return set;
+}
 
 function makeDraggable(list, onReorder) {
   let dragEl = null;
@@ -639,7 +1193,11 @@ function renderSkills(detail, lvl) {
   wrap.onclick = e => { const h = e.target.closest('.sk-h'); if (h) h.parentElement.classList.toggle('open'); };
 }
 $('#modal').onclick = e => { if (e.target.dataset.close !== undefined) $('#modal').hidden = true; };
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#modal').hidden = true; $('#histModal').hidden = true; } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') {
+  const sub = document.querySelector('.iopop, .swappop, .sealpop, .planpop, .priopop'); if (sub) { sub.remove(); return; }   // 위 팝업부터 닫기
+  const ci = document.querySelector('.cmpinfo'); if (ci) { ci.remove(); return; }
+  $('#modal').hidden = true; $('#histModal').hidden = true; $('#cmpModal').hidden = true;
+} });
 
 function toast(msg) {
   let t = $('#toast');
