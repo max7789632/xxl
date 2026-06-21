@@ -836,10 +836,14 @@ function bindCompare() {
     const prio = e.target.closest('[data-prio]');
     if (prio) { openPrioPop(prio.dataset.prio); return; }     // 행동 우선순위 팝업
     const mv = e.target.closest('[data-mv]');
-    if (mv) {
-      const i = +mv.dataset.row, j = mv.dataset.mv === 'up' ? i - 1 : i + 1, sd = mv.dataset.mvside;
-      if (j < 0 || j >= cmpPairs.length) return;
-      [cmpPairs[i][sd], cmpPairs[j][sd]] = [cmpPairs[j][sd], cmpPairs[i][sd]]; renderCmpLane(); return;
+    if (mv) {                                  // ▲▼: 실제 배틀 포지션(슬롯) 이동 — 이웃 점유 슬롯과 교체
+      const i = +mv.dataset.row, sd = mv.dataset.mvside, dir = mv.dataset.mv;
+      const ch = cmpPairs[i] && cmpPairs[i][sd]; if (!ch || ch.slotIdx == null) return;
+      const arr = cmpTeam[sd] || [], k = ch.slotIdx; let t = -1;
+      if (dir === 'up') { for (let x = k - 1; x >= 0; x--) if (arr[x]) { t = x; break; } }
+      else { for (let x = k + 1; x < arr.length; x++) if (arr[x]) { t = x; break; } }
+      if (t < 0) return;
+      [arr[k], arr[t]] = [arr[t], arr[k]]; cmpRelayout(); return;
     }
     const add = e.target.closest('.cmp-cell.empty[data-side]');     // 빈칸 클릭 → 캐릭터 추가
     if (add) { openAddPop(add.dataset.side); return; }
@@ -863,7 +867,13 @@ function bindCompare() {
   $('#cmpBody').addEventListener('drop', e => {
     const row = e.target.closest('.cmp-row'); if (dragRow === null || !row) { dragRow = dragSide = null; return; }
     const j = +row.dataset.row;
-    if (j !== dragRow) { [cmpPairs[dragRow][dragSide], cmpPairs[j][dragSide]] = [cmpPairs[j][dragSide], cmpPairs[dragRow][dragSide]]; renderCmpLane(); }
+    if (j !== dragRow) {                        // 드래그: 두 캐릭의 배틀 포지션(슬롯) 교체
+      const ca = cmpPairs[dragRow] && cmpPairs[dragRow][dragSide], cb = cmpPairs[j] && cmpPairs[j][dragSide];
+      const arr = cmpTeam[dragSide];
+      if (ca && cb && arr && ca.slotIdx != null && cb.slotIdx != null) {
+        [arr[ca.slotIdx], arr[cb.slotIdx]] = [arr[cb.slotIdx], arr[ca.slotIdx]]; cmpRelayout();
+      }
+    }
     dragRow = dragSide = null;
   });
 }
