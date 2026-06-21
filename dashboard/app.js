@@ -376,6 +376,7 @@ let cmpLoaded = { a: null, b: null };    // 현재 로드된 기록 id
 let cmpDmg = { a: {}, b: {} };           // 마지막 시뮬 캐릭별 데미지 (id→dmg)
 let cmpPending = false;                  // 편집 후 재계산 대기 상태
 let cmpTurnOv = { a: {}, b: {} };        // 비교군별 턴 오버라이드 {turn:[position,...]}
+let cmpManual = false;                   // 사용자가 직접 위치를 옮기기 시작하면 true → 자동매칭 끄고 위치기반
 function cmpSideRec(side) {              // 드롭다운 값 → 저장기록 또는 빈(커스텀) 그룹
   const val = $('#cmp' + (side === 'a' ? 'A' : 'B')).value;
   if (!val) return { id: '__' + side, snap: { team: [], turns: 30, runs: 50, turnOverrides: {} } };
@@ -404,7 +405,31 @@ function cfgFromTeam(side, snap) {        // 편집된 팀 + 공통설정으로 
   };
 }
 function markCmpDirty() { cmpPending = true; $('#cmpRun')?.classList.add('dirty'); if (cmpData && cmpData.a) renderCmpLane(); }
-function cmpRelayout() { cmpPairs = autoMatch(cmpChars('a'), cmpChars('b')); markCmpDirty(); }
+function positionMatch(A, B) {            // 위치(행) 기반 1:1 — 같은캐릭 매칭 없이 행 인덱스로 짝
+  const n = Math.max(A.length, B.length), rows = [];
+  for (let i = 0; i < n; i++) rows.push({ a: A[i] || null, b: B[i] || null });
+  return rows;
+}
+const cmpMatch = () => (cmpManual ? positionMatch : autoMatch)(cmpChars('a'), cmpChars('b'));
+function cmpRelayout() { cmpPairs = cmpMatch(); markCmpDirty(); }
+// 사용자가 처음 직접 옮길 때: 현재 화면(autoMatch) 배치를 슬롯 순서로 확정 → 이후 자동매칭 끔(완전 수동)
+function cmpGoManual() {
+  if (cmpManual) return;
+  for (const sd of ['a', 'b']) {
+    const remap = {}, newTeam = [];
+    cmpPairs.forEach((r, i) => { const ch = r[sd];
+      if (ch && ch.cfg) { remap[ch.slotIdx + 1] = i + 1; newTeam[i] = ch.cfg; } else newTeam[i] = null; });
+    cmpTeam[sd] = newTeam;
+    const ov = cmpTurnOv[sd];
+    if (ov) for (const t in ov) ov[t] = ov[t].map(p => remap[p] ?? p);
+  }
+  cmpManual = true;
+}
+// 슬롯(포지션) 교체 시 turnOverrides의 포지션 번호도 함께 교체 — 턴별 우선순위가 같은 캐릭을 계속 가리키게
+function cmpSwapTurnOv(side, p1, p2) {
+  const ov = cmpTurnOv[side]; if (!ov) return;
+  for (const t in ov) ov[t] = ov[t].map(p => p === p1 ? p2 : (p === p2 ? p1 : p));
+}
 function syncCommon() {
   cmpCommon = {
     forceProc: $('#cmpForce').classList.contains('on'), hp10: $('#cmpHp10').classList.contains('on'),
@@ -795,7 +820,7 @@ async function runCompare() {
     cmpDmg.b = {}; (db.perChar || []).forEach(c => cmpDmg.b[c.id] = c.damage);
     cmpData = { a: { ...da, snap: ra.snap }, b: { ...db, snap: rb.snap }, turns: mt };
     cmpPending = false;
-    cmpPairs = autoMatch(cmpChars('a'), cmpChars('b'));
+    cmpPairs = cmpMatch();                 // 수동 모드면 위치기반(스냅백 없음), 아니면 자동매칭
     renderCmpLane();
   } catch (e) { $('#cmpBody').innerHTML = `<div class="cmp-hint">비교 실패 — ${esc(e.message || '오류')}</div>`; }
 }
@@ -807,13 +832,14 @@ function bindCompare() {
     $('#cmpB').innerHTML = `<option value="">＋ 비교군 B (빈 편성)</option>` + opts();
     $('#cmpA').value = ''; $('#cmpB').value = '';
     cmpLoaded = { a: null, b: null }; cmpTeam = { a: null, b: null }; cmpTurnOv = { a: {}, b: {} };
-    cmpTurnsManual = false;
+    cmpTurnsManual = false; cmpManual = false;
     const ct0 = $('#cmpTurns'); if (ct0) { ct0.value = 30; ct0.style.setProperty('--p', '100%'); $('#cmpTurnsVal').textContent = 30; }
     syncCommon();
     $('#cmpModal').hidden = false; runCompare();
   };
   $('#cmpModal').onclick = e => { if (e.target.dataset.cclose !== undefined) $('#cmpModal').hidden = true; };
-  $('#cmpA').onchange = runCompare; $('#cmpB').onchange = runCompare;
+  $('#cmpA').onchange = () => { cmpManual = false; runCompare(); };   // 새 기록 = 자동매칭 다시
+  $('#cmpB').onchange = () => { cmpManual = false; runCompare(); };
   // 공통 전투 설정 — 변경은 상태만 갱신, 재계산은 '비교하기' 버튼으로 (매번 재실행 방지)
   $('#cmpForce').onclick = () => { $('#cmpForce').classList.toggle('on'); syncCommon(); markCmpDirty(); };
   $('#cmpHp10').onclick = () => { $('#cmpHp10').classList.toggle('on'); syncCommon(); markCmpDirty(); };
@@ -836,14 +862,16 @@ function bindCompare() {
     const prio = e.target.closest('[data-prio]');
     if (prio) { openPrioPop(prio.dataset.prio); return; }     // 행동 우선순위 팝업
     const mv = e.target.closest('[data-mv]');
-    if (mv) {                                  // ▲▼: 실제 배틀 포지션(슬롯) 이동 — 이웃 점유 슬롯과 교체
+    if (mv) {                                  // ▲▼: 위치 이동(수동 전환 후 이웃 행과 교체)
       const i = +mv.dataset.row, sd = mv.dataset.mvside, dir = mv.dataset.mv;
-      const ch = cmpPairs[i] && cmpPairs[i][sd]; if (!ch || ch.slotIdx == null) return;
-      const arr = cmpTeam[sd] || [], k = ch.slotIdx; let t = -1;
+      const ch = cmpPairs[i] && cmpPairs[i][sd]; if (!ch || !ch.cfg) return;
+      cmpGoManual();
+      const arr = cmpTeam[sd] || [], k = arr.indexOf(ch.cfg); if (k < 0) return;
+      let t = -1;
       if (dir === 'up') { for (let x = k - 1; x >= 0; x--) if (arr[x]) { t = x; break; } }
       else { for (let x = k + 1; x < arr.length; x++) if (arr[x]) { t = x; break; } }
       if (t < 0) return;
-      [arr[k], arr[t]] = [arr[t], arr[k]]; cmpRelayout(); return;
+      [arr[k], arr[t]] = [arr[t], arr[k]]; cmpSwapTurnOv(sd, k + 1, t + 1); cmpRelayout(); return;
     }
     const add = e.target.closest('.cmp-cell.empty[data-side]');     // 빈칸 클릭 → 캐릭터 추가
     if (add) { openAddPop(add.dataset.side); return; }
@@ -867,11 +895,12 @@ function bindCompare() {
   $('#cmpBody').addEventListener('drop', e => {
     const row = e.target.closest('.cmp-row'); if (dragRow === null || !row) { dragRow = dragSide = null; return; }
     const j = +row.dataset.row;
-    if (j !== dragRow) {                        // 드래그: 두 캐릭의 배틀 포지션(슬롯) 교체
+    if (j !== dragRow) {                        // 드래그: 수동 전환 후 두 캐릭 위치(슬롯) 교체 — 스냅백 없음
       const ca = cmpPairs[dragRow] && cmpPairs[dragRow][dragSide], cb = cmpPairs[j] && cmpPairs[j][dragSide];
-      const arr = cmpTeam[dragSide];
-      if (ca && cb && arr && ca.slotIdx != null && cb.slotIdx != null) {
-        [arr[ca.slotIdx], arr[cb.slotIdx]] = [arr[cb.slotIdx], arr[ca.slotIdx]]; cmpRelayout();
+      if (ca && cb && ca.cfg && cb.cfg) {
+        cmpGoManual();
+        const arr = cmpTeam[dragSide], ka = arr.indexOf(ca.cfg), kb = arr.indexOf(cb.cfg);
+        if (ka >= 0 && kb >= 0) { [arr[ka], arr[kb]] = [arr[kb], arr[ka]]; cmpSwapTurnOv(dragSide, ka + 1, kb + 1); cmpRelayout(); }
       }
     }
     dragRow = dragSide = null;
