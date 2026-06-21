@@ -12,9 +12,9 @@ const DATA_FILES = ['data/chars.json', 'data/skills.json'];
 
 let pyodide;
 const ready = (async () => {
-  postMessage({ type: 'progress', msg: 'Python 런타임 다운로드…' });
+  postMessage({ type: 'progress', msg: '正在下載 Python 執行環境…' });
   pyodide = await loadPyodide({ indexURL: `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VER}/full/` });
-  postMessage({ type: 'progress', msg: '엔진·데이터 불러오는 중…' });
+  postMessage({ type: 'progress', msg: '正在載入引擎與資料…' });
   try { pyodide.FS.mkdir('woofia_sim'); } catch {}
   try { pyodide.FS.mkdir('data'); } catch {}
   // 배포 버전을 쿼리로 붙여 캐시 무력화 — 새 배포마다 새 URL이라 항상 최신 엔진을 받는다.
@@ -23,7 +23,7 @@ const ready = (async () => {
   const q = '?v=' + encodeURIComponent(ver || Date.now());
   const all = [...PY_FILES, ...DATA_FILES];
   const texts = await Promise.all(all.map(p => fetch(p + q, { cache: 'no-cache' }).then(r => {
-    if (!r.ok) throw new Error(`${p} 로드 실패 (${r.status})`); return r.text();
+    if (!r.ok) throw new Error(`${p} 載入失敗（${r.status}）`); return r.text();
   })));
   all.forEach((p, i) => pyodide.FS.writeFile(p, texts[i]));
   pyodide.runPython('import sys, json\nif "/" not in sys.path: sys.path.insert(0, "/")\nimport sim_api\nsim_api.all_meta()');

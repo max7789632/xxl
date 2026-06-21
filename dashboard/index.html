@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="zh-Hant-TW">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>XXL WOOFIA · 전투 시뮬레이터</title>
+<title>XXL WOOFIA · 戰鬥模擬器</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,148 +12,143 @@
 
 <div id="boot"><div class="boot-box">
   <span class="spin big"></span>
-  <div class="boot-title">시뮬레이터 엔진 로딩 중…</div>
-  <small id="bootMsg">시작하는 중…</small>
-  <em>최초 1회만 (~10초), 이후엔 캐시되어 빨라요</em>
+  <div class="boot-title">正在載入模擬器引擎…</div>
+  <small id="bootMsg">正在啟動…</small>
+  <em>首次載入約 10 秒，之後會使用快取加速</em>
 </div></div>
 
 <header class="topbar">
   <div class="brand">
     <span class="logo-mark">XXL</span>
     <span class="logo-word">WOOFIA</span>
-    <span class="logo-sub">전투 시뮬레이터</span>
+    <span class="logo-sub">戰鬥模擬器</span>
   </div>
   <div class="topbar-hist">
-    <label for="history">기록</label>
-    <select id="history" title="지난 시뮬레이션 기록"><option value="">— 기록 없음 —</option></select>
-    <button id="histManage" class="hist-clear" title="기록 관리 (선택 삭제)">⚙</button>
+    <label for="history">紀錄</label>
+    <select id="history" title="過去的模擬紀錄"><option value="">— 無紀錄 —</option></select>
+    <button id="histManage" class="hist-clear" title="紀錄管理（選取刪除）">⚙</button>
   </div>
-  <div class="topbar-meta" id="topMeta">타겟 더미 · 결정론 시뮬</div>
+  <div class="topbar-meta" id="topMeta">目標假人 · 確定性模擬</div>
 </header>
 
 <main class="wrap">
 
-  <!-- ─── 팀 빌더 ─── -->
   <section class="panel build">
-    <div class="panel-head"><h2>팀 편성</h2><p class="hint">로스터에서 캐릭터를 골라 슬롯에 배치 · 아이콘을 눌러 스펙/스킬 조정</p></div>
+    <div class="panel-head"><h2>隊伍編成</h2><p class="hint">從角色列表選擇角色並放入欄位，點擊圖示可調整能力與技能</p></div>
 
     <div class="team-slots" id="teamSlots"></div>
 
-    <div class="roster-head"><h3>캐릭터 로스터</h3><div class="roster-filter" id="rosterFilter"></div></div>
+    <div class="roster-head"><h3>角色列表</h3><div class="roster-filter" id="rosterFilter"></div></div>
     <div class="roster" id="roster"></div>
   </section>
 
-  <!-- ─── 설정 ─── -->
   <aside class="panel settings">
-    <div class="panel-head"><h2>전투 설정</h2>
-      <button class="proc-btn" id="forceProc" title="모든 확률형 발동·버프(흑구백구 활성화, 50% 발동 등)를 100%로 강제">🎲 확률 100%</button>
+    <div class="panel-head"><h2>戰鬥設定</h2>
+      <button class="proc-btn" id="forceProc" title="將所有機率型發動與增益強制為 100%">🎲 機率 100%</button>
     </div>
-    <div class="proc-row"><button class="proc-btn" id="hp10Btn" title="더미 체력을 10%로 고정 (카라트 등 저HP 게이트 전부 발동)">❤️ 체력 10%</button></div>
+    <div class="proc-row"><button class="proc-btn" id="hp10Btn" title="將假人體力固定為 10%，觸發低 HP 條件">❤️ 體力 10%</button></div>
 
-    <label class="field" id="runsField"><span>반복 횟수 <em>(평균 — 많을수록 정확·느림)</em></span>
+    <label class="field" id="runsField"><span>重複次數 <em>平均值，次數越多越準但越慢</em></span>
       <div class="row"><input type="range" id="runs" min="1" max="200" value="50"><b id="runsVal">50</b></div>
     </label>
 
-    <label class="field"><span>진행 턴 수</span>
+    <label class="field"><span>進行回合數</span>
       <div class="row"><input type="range" id="turns" min="1" max="30" value="30"><b id="turnsVal">30</b></div>
     </label>
-    <label class="field"><span>더미 속성 <em>(상성 ×1.5 / 역상성 ×0.75 / 무속성·무관 영향 없음)</em></span>
+    <label class="field"><span>假人屬性 <em>剋制 ×1.5 / 被剋 ×0.75 / 無屬性或無關時不影響</em></span>
       <div class="seg elseg" id="dummyElement" data-val="0">
-        <button data-v="0" class="on">무</button><button data-v="1">불</button><button data-v="2">물</button><button data-v="3">풀</button><button data-v="4">빛</button><button data-v="5">어둠</button>
+        <button data-v="0" class="on">無</button><button data-v="1">火</button><button data-v="2">水</button><button data-v="3">木</button><button data-v="4">光</button><button data-v="5">暗</button>
       </div>
     </label>
-    <label class="field"><span>적 더미 수</span>
+    <label class="field"><span>敵方假人數</span>
       <div class="seg" id="dummies" data-val="1">
         <button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
       </div>
     </label>
-    <label class="field"><span>아군 피격 횟수 <em>(N=랜덤 N명 개별 타격 / 전체=아군 전체 1회 동시 피격)</em></span>
+    <label class="field"><span>我方受擊次數 <em>N=隨機 N 名個別受擊 / 全體=我方全員同時受擊 1 次</em></span>
       <div class="seg" id="enemyHits" data-val="5">
-        <button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5" class="on">5</button><button data-v="all">전체</button>
+        <button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5" class="on">5</button><button data-v="all">全體</button>
       </div>
     </label>
 
     <div class="field">
-      <span>행동 우선순위 <em>(드래그로 순서 변경)</em></span>
+      <span>行動優先順序 <em>拖曳即可變更順序</em></span>
       <ol class="prio" id="prio"></ol>
       <div class="prio-turn">
-        <span class="pt-label">특정 턴만 다르게 <em>(턴 여러 개 토글 선택 → 한 번에 순서 편집)</em></span>
+        <span class="pt-label">只調整特定回合 <em>可切換選取多個回合，一次編輯順序</em></span>
         <div class="turn-chips" id="turnChips"></div>
         <div id="turnEditor"></div>
       </div>
-      <button class="btn-ghost sm" id="prioReset">전부 기본값으로</button>
+      <button class="btn-ghost sm" id="prioReset">全部恢復預設</button>
     </div>
 
-    <button class="btn-run" id="runBtn"><span>시뮬레이션 실행</span></button>
+    <button class="btn-run" id="runBtn"><span>執行模擬</span></button>
   </aside>
 
-  <!-- ─── 결과 ─── -->
   <section class="panel results" id="results" hidden>
     <div class="hero-stats">
-      <div class="hero-num"><label>총 데미지 <em>중앙값</em></label><b id="hTotal">—</b><span class="hero-range" id="hTotalRange"></span></div>
-      <div class="hero-num"><label>DPS / 턴 <em>중앙값</em></label><b id="hDps">—</b><span class="hero-range" id="hDpsRange"></span></div>
-      <div class="hero-num"><label>턴</label><b id="hTurns">—</b></div>
+      <div class="hero-num"><label>總傷害 <em>中位數</em></label><b id="hTotal">—</b><span class="hero-range" id="hTotalRange"></span></div>
+      <div class="hero-num"><label>DPS / 回合 <em>中位數</em></label><b id="hDps">—</b><span class="hero-range" id="hDpsRange"></span></div>
+      <div class="hero-num"><label>回合</label><b id="hTurns">—</b></div>
     </div>
 
     <div class="rank" id="rank"></div>
 
     <div class="chart-card">
-      <div class="panel-head sm"><h3>턴별 데미지</h3></div>
+      <div class="panel-head sm"><h3>各回合傷害</h3></div>
       <div class="chart" id="chart"></div>
     </div>
 
     <div class="log-card">
-      <div class="panel-head sm"><h3>상세 전투 로그</h3><p class="hint" id="logOrder"></p></div>
+      <div class="panel-head sm"><h3>詳細戰鬥紀錄</h3><p class="hint" id="logOrder"></p></div>
       <div class="log" id="log"></div>
     </div>
   </section>
 
 </main>
 
-<!-- ─── 캐릭터 상세 모달 ─── -->
 <div class="modal" id="modal" hidden>
   <div class="modal-bg" data-close></div>
   <div class="modal-card" id="modalCard"></div>
 </div>
 
-<!-- ─── 기록 관리 모달 ─── -->
 <div class="modal" id="histModal" hidden>
   <div class="modal-bg" data-hclose></div>
   <div class="hist-card">
-    <div class="hist-head"><h3>기록 관리</h3><button class="mc-close" data-hclose>×</button></div>
+    <div class="hist-head"><h3>紀錄管理</h3><button class="mc-close" data-hclose>×</button></div>
     <div class="hist-filter">
-      <input type="text" id="histSearch" placeholder="이름 검색…" autocomplete="off">
+      <input type="text" id="histSearch" placeholder="搜尋名稱…" autocomplete="off">
       <select id="histSort">
-        <option value="date">최신순</option>
-        <option value="date-asc">오래된순</option>
-        <option value="name">이름순</option>
-        <option value="dmg">총딜순</option>
+        <option value="date">最新優先</option>
+        <option value="date-asc">最舊優先</option>
+        <option value="name">名稱排序</option>
+        <option value="dmg">總傷害排序</option>
       </select>
     </div>
     <div class="hist-tools">
-      <button id="hAll" class="btn-ghost sm">모두 선택</button>
-      <button id="hNone" class="btn-ghost sm">모두 해제</button>
-      <button id="hExport" class="btn-ghost sm">내보내기</button>
-      <button id="hImport" class="btn-ghost sm">가져오기</button>
+      <button id="hAll" class="btn-ghost sm">全選</button>
+      <button id="hNone" class="btn-ghost sm">全部取消</button>
+      <button id="hExport" class="btn-ghost sm">匯出</button>
+      <button id="hImport" class="btn-ghost sm">匯入</button>
       <input type="file" id="hImportFile" accept="application/json" hidden>
-      <span class="hsel-count" id="hselCount">0개 선택</span>
+      <span class="hsel-count" id="hselCount">已選 0 筆</span>
     </div>
     <div class="hist-list" id="histList"></div>
     <div class="hist-actions">
-      <button id="hDelSel" class="btn-danger">선택 삭제</button>
-      <button id="hDelOther" class="btn-danger ghost">선택 제외 삭제</button>
+      <button id="hDelSel" class="btn-danger">刪除所選</button>
+      <button id="hDelOther" class="btn-danger ghost">刪除未選</button>
     </div>
   </div>
 </div>
 
-<button class="cmp-fab" id="cmpBtn" title="저장된 두 기록의 조합을 캐릭터별로 비교">⚔️ 조합 비교하기</button>
+<button class="cmp-fab" id="cmpBtn" title="依角色比較兩筆已儲存紀錄的隊伍">⚔️ 比較隊伍</button>
 <div class="last-update" id="lastUpdate"></div>
 
 <div class="modal" id="cmpModal" hidden>
   <div class="modal-bg" data-cclose></div>
   <div class="cmp-wrap">
     <div class="cmp-card">
-      <div class="cmp-head"><h3>조합 비교</h3><button class="mc-close" data-cclose>×</button></div>
+      <div class="cmp-head"><h3>隊伍比較</h3><button class="mc-close" data-cclose>×</button></div>
       <div class="cmp-pick">
         <select id="cmpA" class="cmp-sel"></select>
         <span class="cmp-vs">VS</span>
@@ -162,26 +157,26 @@
       <div class="cmp-body" id="cmpBody"></div>
     </div>
     <div class="cmp-setcard">
-      <div class="cmp-set-title">공통 전투 설정 <em>두 조합에 함께 적용</em></div>
-      <label class="cmp-set-f"><span>진행 턴 수 <b id="cmpTurnsVal" style="color:var(--gold)">13</b></span>
+      <div class="cmp-set-title">共用戰鬥設定 <em>套用到兩個隊伍</em></div>
+      <label class="cmp-set-f"><span>進行回合數 <b id="cmpTurnsVal" style="color:var(--gold)">13</b></span>
         <input type="range" id="cmpTurns" min="1" max="30" value="13"></label>
       <div class="cmp-toggles">
-        <button class="proc-btn" id="cmpForce">🎲 확률 100%</button>
-        <button class="proc-btn" id="cmpHp10">❤️ 체력 10%</button>
+        <button class="proc-btn" id="cmpForce">🎲 機率 100%</button>
+        <button class="proc-btn" id="cmpHp10">❤️ 體力 10%</button>
       </div>
-      <label class="cmp-set-f"><span>더미 속성</span>
+      <label class="cmp-set-f"><span>假人屬性</span>
         <div class="seg elseg" id="cmpEl" data-val="0">
-          <button data-v="0" class="on">무</button><button data-v="1">불</button><button data-v="2">물</button><button data-v="3">풀</button><button data-v="4">빛</button><button data-v="5">어둠</button>
+          <button data-v="0" class="on">無</button><button data-v="1">火</button><button data-v="2">水</button><button data-v="3">木</button><button data-v="4">光</button><button data-v="5">暗</button>
         </div></label>
-      <label class="cmp-set-f"><span>적 더미 수</span>
+      <label class="cmp-set-f"><span>敵方假人數</span>
         <div class="seg" id="cmpDummies" data-val="1">
           <button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
         </div></label>
-      <label class="cmp-set-f"><span>아군 피격 횟수</span>
+      <label class="cmp-set-f"><span>我方受擊次數</span>
         <div class="seg" id="cmpHits" data-val="all">
-          <button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button><button data-v="all" class="on">전체</button>
+          <button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button><button data-v="all" class="on">全體</button>
         </div></label>
-      <button class="cmp-run" id="cmpRun">비교하기</button>
+      <button class="cmp-run" id="cmpRun">開始比較</button>
     </div>
   </div>
 </div>
