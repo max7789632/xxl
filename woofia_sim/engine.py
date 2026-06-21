@@ -154,6 +154,7 @@ class Unit:
     dots: list = field(default_factory=list)  # [target, pct, turns_left, owner, src_skill, cast_snapshot] 지속딜(DoT)
     cond_buffs: list = field(default_factory=list)  # (stack,stat,value,owner,skill,scaled,thresh) while stacks≥thresh
     stack_caps: dict = field(default_factory=dict)  # stack_name -> max count (from its definition line)
+    stack_dur: dict = field(default_factory=dict)   # stack_name -> 고유 수명(턴). 한 번이라도 duration>0로 정의되면 타이머 스택
 
     @property
     def alive(self) -> bool:
@@ -854,11 +855,15 @@ def apply_effect(effect: Effect, caster: Unit, state: BattleState,
                     tgt.stack_caps[name] = max(tgt.stack_caps.get(name, 0), effect.max_stacks)
                 cap = max(tgt.stack_caps.get(name, 0), effect.max_stacks, 1)
                 if effect.duration > 0:
-                    # 타이머 스택: 중첩마다 개별 수명. 재적용해도 기존 중첩의 남은 시간은 유지되고
-                    # 각자 만료된다(전체 리셋 X). 오봉만상을 3턴 간격 방어로 무한 유지하던 버그 수정.
+                    tgt.stack_dur[name] = effect.duration   # 이 스택의 고유 수명 기억
+                native = tgt.stack_dur.get(name, 0)
+                # 타이머 스택: 한 번이라도 duration>0로 정의된 스택은, 이후 dur=0인 ±조작(상어수탄 평타 -1/+1
+                # 등)에도 타이머 리스트를 유지한다. (혼합형 스택이 영구로 변질돼 변환 시 리셋되던 버그 수정)
+                if effect.duration > 0 or native > 0:
+                    # 중첩마다 개별 수명. 재적용해도 기존 중첩의 남은 시간은 유지되고 각자 만료(전체 리셋 X).
                     timers = list(tgt.stack_turns[name]) if isinstance(tgt.stack_turns.get(name), list) else []
                     if delta > 0:
-                        timers.extend([_half_turns(effect.duration)] * delta)
+                        timers.extend([_half_turns(effect.duration if effect.duration > 0 else native)] * delta)
                         if len(timers) > cap:
                             timers = timers[len(timers) - cap:]   # 초과분은 가장 오래된 것부터 밀어냄
                     elif delta < 0:
