@@ -1318,6 +1318,27 @@ function toast(msg) {
   t.innerHTML = `<span class="ti">⚠</span>${msg}`; t.classList.add('show');
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 5000);
 }
+function notifyUpdate() {        // 새 배포 감지 시 기존 접속자에게 띄우는 고정 알림(눌러서 새로고침)
+  if ($('#upToast')) return;
+  const t = document.createElement('div');
+  t.id = 'upToast'; t.className = 'up-toast';
+  t.innerHTML = `🔄 새 버전이 배포됐어요 — <b>눌러서 새로고침</b>`;
+  t.onclick = () => location.reload();
+  document.body.appendChild(t);
+}
+// 배포 감지: version.json을 주기적으로 확인. 내가 로드한 버전과 달라지면(=그새 새 배포) 알림.
+// 새로 접속한 사람은 이미 최신이라 차이가 없어 알림이 안 뜬다. (로컬은 version.json 없음 → 무시)
+(function watchDeploy() {
+  let loaded = null;
+  const check = () => fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null).then(v => {
+      const cur = v && v.updated; if (!cur) return;
+      if (loaded === null) loaded = cur;          // 최초 = 기준
+      else if (cur !== loaded) notifyUpdate();
+    }).catch(() => { });
+  check();
+  setInterval(check, 120000);                     // 2분마다
+})();
 
 // ── run simulation ──
 async function run(save = true) {
