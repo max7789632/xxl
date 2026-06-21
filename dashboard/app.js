@@ -69,6 +69,7 @@ function snapshot() {
   return {
     team: team.map(s => s ? JSON.parse(JSON.stringify(s)) : null),
     turns: +$('#turns').value, dummies: $('#dummies').dataset.val, enemyHits: $('#enemyHits').dataset.val,
+    dummyElement: $('#dummyElement').dataset.val,
     runs: +$('#runs').value, forceProc, turnOverrides: JSON.parse(JSON.stringify(turnOverrides)),
   };
 }
@@ -102,6 +103,7 @@ function restoreRecord(rec) {
   const tr = $('#turns'); tr.value = s.turns; tr.dispatchEvent(new Event('input'));
   const rr = $('#runs'); if (rr) { rr.value = s.runs ?? 50; rr.dispatchEvent(new Event('input')); }
   setSeg('dummies', s.dummies); setSeg('enemyHits', s.enemyHits);
+  setSeg('dummyElement', s.dummyElement ?? 0);
   $('#forceProc').classList.toggle('on', forceProc); syncRunsField();
   buildFilters(); renderRoster(); renderTeam(); renderPrio();
   if (rec.data) { lastResult = rec.data; renderResults(rec.data); }   // 구버전 기록(결과 내장)
@@ -562,11 +564,12 @@ async function run(save = true) {
   const unplanned = picked.find(s => (CHARS[s.id].actionsPerTurn || 1) > 1 && !s.usePlan);
   if (unplanned) toast(`주의 — ${CHARS[unplanned.id].name}의 턴별 행동을 설정하는 걸 추천드립니다`);
   const hpSchedChar = picked.find(s => CHARS[s.id].hpSchedule);   // 카라트: 적 HP 의존
-    if (hpSchedChar) toast(`${CHARS[hpSchedChar.id].name} 동반 — 적 HP%가 진행 턴을 4등분해 단계적으로 감소합니다 (앞 1/4 ≥75% → 막 1/4 &lt;25%)`);
+    if (hpSchedChar && !forceProc) toast(`${CHARS[hpSchedChar.id].name} 동반 — 적 HP%가 진행 턴을 4등분해 단계적으로 감소합니다 (앞 1/4 ≥75% → 막 1/4 &lt;25%)`);
   const btn = $('#runBtn'); btn.classList.add('busy'); btn.querySelector('span').innerHTML = '<span class="spin"></span>계산 중…';
   const cfg = {
     team: picked.map(s => ({ id: s.id, position: s.position, skill: s.skill, rune: s.rune, rotation: s.rotation || null, priority: s.priority, sealAtk: s.sealOn ? (s.sealAtk ?? 0) : 0, sealHp: s.sealOn ? (s.sealHp ?? 0) : 0 })),
     turns: +$('#turns').value, dummies: +$('#dummies').dataset.val, enemyHits: $('#enemyHits').dataset.val,
+    dummyElement: +$('#dummyElement').dataset.val,
     turnOrders: turnOverrides, forceProc, runs: +$('#runs').value,
   };
   try {
@@ -761,8 +764,12 @@ function renderHit(l) {
   // 지속(도트) 전용 채널 — DoT 틱에만 표시
   const dd = (d.dotDealt || []).length ? ' × ' + chan('지속딜 증가', d.dotDealt) : '';
   const dt = (d.dotTaken || []).length ? ' × ' + chan('받는 지속딜', d.dotTaken) : '';
+  // 속성 상성 배율 (1.0 아닐 때만): 상성 ×1.5(초록) / 역상성 ×0.75(빨강)
+  const em = d.elemMult;
+  const elem = (em && em !== 1)
+    ? ` × <span class="elemx ${em > 1 ? 'adv' : 'dis'}">${em > 1 ? '상성' : '역상성'} ×${em}</span>` : '';
   return `<div class="hit"><div class="hit-top"><b class="num">${fmt(d.final)}</b><span class="hm">ATK ${fmt(d.atkTotal)}</span></div>
-    <div class="formula">(${inner}) × ${sk}${dealt}${eff}${tg}${tp}${takenOld}${dd}${dt}</div></div>`;
+    <div class="formula">(${inner}) × ${sk}${dealt}${eff}${tg}${tp}${takenOld}${dd}${dt}${elem}</div></div>`;
 }
 function showSource(chip) {
   document.querySelector('.srcpop')?.remove();

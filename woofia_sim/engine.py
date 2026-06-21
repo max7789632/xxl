@@ -292,6 +292,7 @@ class BattleState:
     cur_atk_by: str = ""         # 피격 그룹: 현재 공격 중인 적(더미) 이름
     force_proc: bool = False      # 확률 100% 모드: 모든 확률 판정을 무조건 성공으로
     hp_schedule: bool = False     # 카라트 등 HP게이트 캐릭 동반 시 더미 HP% 4등분 스케줄
+    dummy_element: int = 0        # 더미 속성 (EProp: 0무·1불·2물·3나무·4빛·5어둠) — 상성 배율용
     turn_basics: set = field(default_factory=set)   # 이번 턴 평타한 아군 char_id (다양수이 협동)
     turn_exes: set = field(default_factory=set)     # 이번 턴 필살 쓴 아군 char_id
     coord_fired: set = field(default_factory=set)   # 이번 턴 이미 발동한 협동 트리거 id
@@ -508,6 +509,23 @@ def _dot_cast_snapshot(caster: "Unit", tgt: "Unit") -> dict:
     }
 
 
+# 속성 상성 (인게임 검증: 어둠→빛 ×1.5 = +50%). 순환 불(1)→나무(3)→물(2)→불,
+# 빛(4)↔어둠(5) 상호. 키=공격 속성, 값=그 속성이 우위를 점하는 피격 속성.
+_ELEM_BEATS = {1: 3, 3: 2, 2: 1, 4: 5, 5: 4}
+
+
+def _element_mult(atk_el: int, def_el: int) -> float:
+    """속성 상성 최종 배수: 상성 ×1.5(+50%) / 역상성 ×0.75(-25%) / 무속성(0)·무관 ×1.0.
+    데미지 식 맨 끝(주는딜·받뎀 다 곱한 뒤)에 곱한다(인게임 검증)."""
+    if not atk_el or not def_el:
+        return 1.0
+    if _ELEM_BEATS.get(atk_el) == def_el:
+        return 1.5
+    if _ELEM_BEATS.get(def_el) == atk_el:
+        return 0.75
+    return 1.0
+
+
 def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: str,
                 src_id: int, src_skill: str, state: "BattleState",
                 snap: dict | None = None) -> None:
@@ -539,7 +557,8 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
                   for b in tgt.buffs if b.stat == STAT_DOT_TAKEN] if action == "dot" else [])
     dot_mult = ((1 + sum(c["v"] for c in dot_dealt) / 100) *
                 (1 + sum(c["v"] for c in dot_taken) / 100))
-    dmg = round(atk * pct / 100 * out * inc * dot_mult, 2)
+    elem = _element_mult(caster.element, tgt.element)   # 속성 상성 (상성×1.5/역상성×0.75/무·무관×1.0)
+    dmg = round(atk * pct / 100 * out * inc * dot_mult * elem, 2)
     tgt.hp -= dmg
     caster.damage_dealt += dmg
     # 받뎀증은 별개 곱연산 채널 2개: 일반(element 0) / 속성(공격자 속성과 일치)
@@ -559,10 +578,12 @@ def _record_hit(caster: "Unit", tgt: "Unit", pct: float, action: str, act_kr: st
         "eff": eff,
         "takenG": taken_g, "takenP": taken_p,
         "dotDealt": dot_dealt, "dotTaken": dot_taken,
+        "elemMult": elem,
     }
     state.record(caster.name,
                  f"{act_kr} → {tgt.name} {dmg:,.2f} = "
-                 f"{atk:,.2f}ATK × {pct:g}% × {out:.4f}[{detail}] × {inc:.4f}in",
+                 f"{atk:,.2f}ATK × {pct:g}% × {out:.4f}[{detail}] × {inc:.4f}in"
+                 + (f" × {elem:g}[{'상성' if elem > 1 else '역상성'}]" if elem != 1.0 else ""),
                  amount=dmg, detail=struct)
 
 
@@ -1130,7 +1151,9 @@ def _take_action(unit: Unit, state: BattleState) -> None:
     if unit.is_dummy:
         # enemy phase: the enemy lands N hits, each on a DISTINCT random ally
         # (no ally hit twice), firing their defensive subs (쿼터백/성노 counters).
-        # N=0 -> all allies. Order kept by slot for deterministic sub firing.
+        # enemy_hits<0 -> 적이 공격 안 함(피격/반격 없음). =0 -> all allies.
+        if state.enemy_hits < 0:
+            return
         living = [u for u in state.foes(unit) if u.alive]
         if state.enemy_aoe:
             # 전체공격: 아군 전체가 1회 "동시" 피격. 동시 타격이므로 한 아군의 반격(발동딜)은
@@ -1423,7 +1446,8 @@ def simulate(kits: list[ResolvedKit], n_dummies: int = 1, max_turn: int = 30,
              slots: list[int] | None = None,
              priorities: list[float] | None = None,
              enemy_hits: int = 0, turn_orders: dict | None = None,
-             force_proc: bool = False, enemy_aoe: bool = False) -> BattleState:
+             force_proc: bool = False, enemy_aoe: bool = False,
+             dummy_element: int = 0) -> BattleState:
     """Run a target-dummy battle and return the final state (with log).
 
     rotations: optional per-ally action strings (e.g. '평평방궁|평방궁').
@@ -1440,10 +1464,13 @@ def simulate(kits: list[ResolvedKit], n_dummies: int = 1, max_turn: int = 30,
             u.rotation_prefix, u.rotation_loop = parse_rotation(rotations[i])
         allies.append(u)
     enemies = [make_dummy(i) for i in range(max(1, min(n_dummies, 5)))]
+    for e in enemies:
+        e.element = dummy_element        # 더미 속성 → 공격자 속성과 상성 판정
     state = BattleState(allies=allies, enemies=enemies, max_turn=max_turn,
                         rng=random.Random(seed), enemy_hits=enemy_hits, enemy_aoe=enemy_aoe,
                         turn_orders=turn_orders or {}, force_proc=force_proc,
-                        hp_schedule=any(_kit_has_hp_gate(u._kit) for u in allies))
+                        hp_schedule=any(_kit_has_hp_gate(u._kit) for u in allies),
+                        dummy_element=dummy_element)
 
     for u in allies:
         _install_passives(u, state)

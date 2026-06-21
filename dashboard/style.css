@@ -122,6 +122,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .seg button{flex:1;font:inherit;font-size:12.5px;color:var(--text2);background:var(--bg2);
   border:1px solid var(--line);border-radius:8px;padding:7px 0;cursor:pointer;transition:.14s}
 .seg button.on{color:#0d0c0a;background:var(--gold);border-color:var(--gold);font-weight:600}
+/* 더미 속성 버튼 색 — 무(회)·불(빨)·물(파)·풀(초)·빛(노랑)·어둠(보라) */
+#dummyElement button[data-v="0"]{--c:var(--none)}
+#dummyElement button[data-v="1"]{--c:var(--fire)}
+#dummyElement button[data-v="2"]{--c:var(--water)}
+#dummyElement button[data-v="3"]{--c:var(--wood)}
+#dummyElement button[data-v="4"]{--c:var(--light)}
+#dummyElement button[data-v="5"]{--c:var(--dark)}
+#dummyElement button{color:var(--c);border-color:color-mix(in srgb,var(--c) 45%,var(--line))}
+#dummyElement button.on{color:#0d0c0a;background:var(--c);border-color:var(--c);font-weight:700}
 .prio{list-style:none;display:flex;flex-direction:column;gap:6px;margin:0}
 .prio li{display:flex;align-items:center;gap:9px;padding:6px 8px 6px 10px;background:var(--bg2);
   border:1px solid var(--line);border-radius:9px;font-size:12.5px;transition:border-color .12s,background .12s;cursor:grab;
@@ -271,6 +280,9 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;heigh
 .hit-top .hm{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .formula{font-size:12px;line-height:2;color:var(--text2);font-variant-numeric:tabular-nums}
 .formula .sk{color:var(--text);font-weight:600}
+.formula .elemx{display:inline-block;padding:1px 7px;border-radius:6px;font-weight:700;white-space:nowrap;border:1px solid}
+.formula .elemx.adv{color:var(--wood);background:rgba(107,210,140,.12);border-color:rgba(107,210,140,.34)}
+.formula .elemx.dis{color:var(--fire);background:rgba(255,122,82,.12);border-color:rgba(255,122,82,.34)}
 .chan{display:inline-block;padding:1px 7px;border-radius:6px;background:var(--bg2);border:1px solid var(--line2);
   color:var(--gold);font-weight:600;cursor:pointer;transition:.12s;white-space:nowrap}
 .chan:hover{background:var(--gold-soft);border-color:var(--gold-d)}

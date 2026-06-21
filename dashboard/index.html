@@ -56,6 +56,11 @@
     <label class="field"><span>진행 턴 수</span>
       <div class="row"><input type="range" id="turns" min="1" max="30" value="30"><b id="turnsVal">30</b></div>
     </label>
+    <label class="field"><span>더미 속성 <em>(상성 ×1.5 / 역상성 ×0.75 / 무속성·무관 영향 없음)</em></span>
+      <div class="seg" id="dummyElement" data-val="0">
+        <button data-v="0" class="on">무</button><button data-v="1">불</button><button data-v="2">물</button><button data-v="3">풀</button><button data-v="4">빛</button><button data-v="5">어둠</button>
+      </div>
+    </label>
     <label class="field"><span>적 더미 수</span>
       <div class="seg" id="dummies" data-val="1">
         <button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
@@ -63,7 +68,7 @@
     </label>
     <label class="field"><span>적이 아군을 때리는 횟수 <em>(N=랜덤 N명 개별 타격 / 전체=아군 전체 1회 동시 피격)</em></span>
       <div class="seg" id="enemyHits" data-val="5">
-        <button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5" class="on">5</button><button data-v="all">전체</button>
+        <button data-v="0">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5" class="on">5</button><button data-v="all">전체</button>
       </div>
     </label>
 
