@@ -517,7 +517,7 @@ function openCmpInfo(c) {
       <div class="ci-r tap" data-seal><span>도장 강화</span><b class="ci-state ${cf.sealOn ? 'on' : ''}" id="ciSeal">${cf.sealOn ? 'ON' : 'OFF'} ▸</b></div>
       <div class="ci-r"><span>기본 공격력</span><b id="ciAtk">${fmt((ch.atk || 0) + ua)}${ua ? `<em>(+${fmt(ua)})</em>` : ''}</b></div>
       <div class="ci-r"><span>최대 체력</span><b id="ciHp">${fmt((ch.hp || 0) + uh)}${uh ? `<em>(+${fmt(uh)})</em>` : ''}</b></div>
-      <div class="ci-r tap" data-plan><span>행동</span><b class="ci-state">${isManual ? '수동' : '자동'} ▸</b></div>
+      <div class="ci-r tap" data-plan><span>행동</span><b class="ci-state" id="ciAct">${isManual ? '수동' : '자동'} ▸</b></div>
     </div></div>`;
   document.body.appendChild(pop);
   pop.onclick = e => {
@@ -640,6 +640,7 @@ function openPlanPopup(c) {
   $('#ppOn').onchange = () => {
     c.cfg.usePlan = $('#ppOn').checked;
     if (c.cfg.usePlan && !(c.cfg.plan && c.cfg.plan.length)) c.cfg.plan = defaultPlan(CHARS[c.id] || {}, cmpCommon.turns || 30);
+    const a = $('#ciAct'); if (a) a.textContent = (c.cfg.usePlan ? '수동' : '자동') + ' ▸';   // 상세 팝업 라벨 즉시 갱신
     markCmpDirty(); renderPlanPop(c);
   };
   renderPlanPop(c);
