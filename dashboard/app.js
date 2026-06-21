@@ -211,6 +211,26 @@ function openHistMenu(btn, r) {
 }
 const b64encode = s => btoa(unescape(encodeURIComponent(s)));   // UTF-8 안전 (한글 포함)
 const b64decode = s => decodeURIComponent(escape(atob(s)));
+// deflate 압축 코드 ('!' 접두) — base64보다 훨씬 짧음. 미지원 브라우저는 평문 base64 폴백.
+async function compressCode(str) {
+  if (typeof CompressionStream === 'undefined') return b64encode(str);
+  const cs = new CompressionStream('deflate');
+  const w = cs.writable.getWriter(); w.write(new TextEncoder().encode(str)); w.close();
+  const buf = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  let bin = ''; for (const b of buf) bin += String.fromCharCode(b);
+  return '!' + btoa(bin);
+}
+async function decompressCode(code) {
+  code = code.trim();
+  if (code[0] === '!') {                              // 압축 코드
+    const bin = atob(code.slice(1)), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const ds = new DecompressionStream('deflate');
+    const w = ds.writable.getWriter(); w.write(bytes); w.close();
+    return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer());
+  }
+  try { return b64decode(code); } catch { return code; }   // 구버전: 평문 base64 / 생 JSON
+}
 function importRecords(arr) {                 // 공통 머지 (성공 시 true)
   if (!Array.isArray(arr)) { toast('가져오기 실패 — 형식이 올바르지 않아요'); return false; }
   const have = new Set(simHistory.map(r => r.id));
@@ -221,11 +241,11 @@ function importRecords(arr) {                 // 공통 머지 (성공 시 true)
   toast(`${add.length}개 기록을 가져왔어요 (중복 제외)`);
   return true;
 }
-function openExportPop() {
+async function openExportPop() {
   const ids = selectedHistIds();
   const out = simHistory.filter(r => ids.has(r.id));     // 선택분만
   if (!out.length) return toast('내보낼 기록을 먼저 선택하세요');
-  const code = b64encode(JSON.stringify(out));
+  const code = await compressCode(JSON.stringify(out));
   document.querySelector('.iopop')?.remove();
   const pop = document.createElement('div'); pop.className = 'iopop';
   pop.innerHTML = `<div class="io-card"><button class="mc-close" data-ioclose>×</button>
@@ -259,10 +279,10 @@ function openImportPop() {
     <button class="io-big" id="ioPasteBtn">코드로 가져오기</button></div>`;
   document.body.appendChild(pop);
   $('#ioPickFile').onclick = () => $('#hImportFile').click();
-  $('#ioPasteBtn').onclick = () => {
+  $('#ioPasteBtn').onclick = async () => {
     const v = $('#ioPaste').value.trim(); if (!v) return toast('코드를 붙여넣어 주세요');
     let arr;
-    try { arr = JSON.parse(b64decode(v)); } catch { try { arr = JSON.parse(v); } catch { return toast('가져오기 실패 — 올바른 코드가 아니에요'); } }
+    try { arr = JSON.parse(await decompressCode(v)); } catch { try { arr = JSON.parse(v); } catch { return toast('가져오기 실패 — 올바른 코드가 아니에요'); } }
     if (importRecords(arr)) pop.remove();
   };
   pop.onclick = e => { if (e.target.dataset.ioclose !== undefined || e.target === pop) pop.remove(); };
@@ -270,10 +290,10 @@ function openImportPop() {
 function importHistory(e) {
   const f = e.target.files[0]; if (!f) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     let arr;
     try { arr = JSON.parse(reader.result); }
-    catch { try { arr = JSON.parse(b64decode(reader.result.trim())); } catch { toast('가져오기 실패 — 올바른 기록 파일이 아니에요'); e.target.value = ''; return; } }
+    catch { try { arr = JSON.parse(await decompressCode(reader.result.trim())); } catch { toast('가져오기 실패 — 올바른 기록 파일이 아니에요'); e.target.value = ''; return; } }
     importRecords(arr); document.querySelector('.iopop')?.remove(); e.target.value = '';
   };
   reader.readAsText(f);
