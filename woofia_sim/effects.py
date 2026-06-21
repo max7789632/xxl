@@ -725,8 +725,9 @@ def _target(text: str) -> str:
         return "allies"
     if "self" in t or t in ("themselves", "themself", "itself"):
         return "self"
-    # a named character (e.g. "Haniya", "Famido") = the effect owner / grantor
-    if re.match(r"^[A-Z][a-z]+$", text.strip()):
+    # a named character (e.g. "Haniya", "Famido", "Jet Black", "Capt. Locke") = the
+    # effect owner / grantor. 단어 1개~여러 개 영문명(공백 구분) 모두 인식.
+    if re.match(r"^[A-Z][A-Za-z.]*(?: [A-Z][A-Za-z.]*)*$", text.strip()):
         return "grantor"
     return f"raw:{text.strip()}"
 
