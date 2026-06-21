@@ -1456,8 +1456,11 @@ def simulate(kits: list[ResolvedKit], n_dummies: int = 1, max_turn: int = 30,
         state.turn_basics.clear()           # 다양수이 협동: 턴별 행동 집계 리셋
         state.turn_exes.clear()
         state.coord_fired.clear()
-        if state.hp_schedule:               # 카라트: 전체 턴을 4등분해 더미 HP%를 단계적으로 낮춘다
-            pct = _hp_sched_pct(state.turn, state.max_turn)
+        if state.hp_schedule:               # 카라트 등 HP게이트 캐릭 동반 시 더미 HP% 조절
+            # 확률 100% 모드: 더미 HP를 <25%로 고정 → 카라트 저HP 게이트(주는딜 +15%×3 ·
+            # 추가타 100%, HP<75/<50/<25)를 매 턴 전부 발동. (피의 표식은 HP≥50 조건이라 미발동)
+            # 평소: 전체 턴 4등분해 HP%를 단계적으로 낮춘다(빌드→덤프 현실 반영).
+            pct = 0.10 if state.force_proc else _hp_sched_pct(state.turn, state.max_turn)
             for e in enemies:
                 e.hp = e.max_hp * pct
         for u in allies:

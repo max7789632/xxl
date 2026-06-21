@@ -327,7 +327,11 @@ function bindSettings() {
     const b = e.target.closest('button'); if (!b) return;
     seg.dataset.val = b.dataset.v; seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
   });
-  $('#forceProc').onclick = () => { forceProc = !forceProc; $('#forceProc').classList.toggle('on', forceProc); syncRunsField(); };
+  $('#forceProc').onclick = () => {
+    forceProc = !forceProc; $('#forceProc').classList.toggle('on', forceProc); syncRunsField();
+    if (forceProc) toast('확률 100% 모드 ON<br>· 모든 확률형 스킬 100% 강제<br>· 더미 체력 10% 고정');
+    else toast('확률 100% 모드 OFF');
+  };
   $('#runBtn').onclick = () => run(true);
 }
 let forceProc = false;   // 확률 100% 모드
